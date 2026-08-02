@@ -5,10 +5,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import text
 
-from crv_adapters.llm import LlmClient, LlmError
-from crv_adapters.secrets import get_adapter as get_secrets
+from crv_adapters.llm import LlmError, client_from_org
 from crv_core.db import session_factory
-from crv_core.settings import get_settings
 
 router = APIRouter()
 
@@ -22,19 +20,21 @@ class LlmTestOut(BaseModel):
 
 @router.post("/admin/llm/test", response_model=LlmTestOut)
 async def llm_test() -> LlmTestOut:
-    s = get_settings()
+    async with session_factory()() as db:
+        row = (await db.execute(text(
+            "SELECT COALESCE(settings->'providers', '[]'::jsonb) AS ps FROM organizations WHERE slug='default'"
+        ))).mappings().one()
+    providers = list(row["ps"] or [])
     try:
-        secrets = get_secrets(s.secrets_backend)
-        key = await secrets.get(s.llm_api_key_ref)
-        client = LlmClient(s.llm_base_url, key, timeout_s=15)
+        client = client_from_org(providers, timeout_s=15)
         resp = await client.chat(
-            s.llm_model_fast,
+            "fast",  # resolves via role_map
             [{"role": "user", "content": "Reply with the single word: pong."}],
             temperature=0.0,
         )
         return LlmTestOut(ok=True, model=resp.model, latency_ms=resp.latency_ms, error=None)
-    except (LlmError, KeyError) as e:
-        return LlmTestOut(ok=False, model=s.llm_model_fast, latency_ms=None, error=str(e))
+    except LlmError as e:
+        return LlmTestOut(ok=False, model="?", latency_ms=None, error=str(e))
 
 
 @router.get("/runs")

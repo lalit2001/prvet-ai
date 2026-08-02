@@ -27,6 +27,18 @@ async def run(ctx, repo_id: str, local_path: str, commit_sha: str) -> dict:
     started = datetime.now(timezone.utc)
 
     async with session_factory()() as db:
+        # Idempotency: same repo+commit → return the existing baseline. PRD F4.
+        existing = (await db.execute(text("""
+            SELECT r.id::text AS run_id, r.stats, b.id::text AS baseline_id
+            FROM runs r LEFT JOIN baselines b ON b.run_id = r.id
+            WHERE r.idempotency_key = :key AND r.status = 'succeeded'
+        """), {"key": f"baseline:{repo_id}:{commit_sha}"})).mappings().one_or_none()
+        if existing:
+            s = existing["stats"] or {}
+            return {"status": "succeeded", "cached": True,
+                    "run_id": existing["run_id"], "baseline_id": existing["baseline_id"],
+                    "files_indexed": s.get("files_indexed", 0), "symbols": s.get("symbols", 0)}
+
         await db.execute(text("""
             INSERT INTO runs (id, repo_id, run_type, trigger, status, commit_sha,
                               idempotency_key, started_at, stats)

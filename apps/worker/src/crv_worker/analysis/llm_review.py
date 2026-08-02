@@ -5,14 +5,11 @@ and a message so the caller can surface the failure — never crashes the run.""
 from __future__ import annotations
 
 import json
-import os
 import uuid
 from dataclasses import dataclass, field
 
-from crv_adapters.llm import LlmClient, LlmError
-from crv_adapters.secrets import get_adapter as get_secrets
+from crv_adapters.llm import LlmError, client_from_org
 from crv_core.db import session_factory
-from crv_core.settings import get_settings
 from sqlalchemy import text
 
 _SYSTEM = """You are a senior code reviewer. Return STRICT JSON:
@@ -46,12 +43,15 @@ class ReviewResult:
 
 async def review(code: str, language: str | None = None, context: str | None = None,
                  run_id: str | None = None) -> ReviewResult:
-    s = get_settings()
+    # Load providers from org.settings; if none, the UI tells the user to add one.
+    async with session_factory()() as db:
+        row = (await db.execute(text(
+            "SELECT COALESCE(settings->'providers', '[]'::jsonb) AS ps FROM organizations WHERE slug='default'"
+        ))).mappings().one()
+    providers = list(row["ps"] or [])
     try:
-        secrets = get_secrets(s.secrets_backend)
-        api_key = await secrets.get(s.llm_api_key_ref)
-        client = LlmClient(s.llm_base_url, api_key, s.llm_timeout_s)
-    except (LlmError, KeyError) as e:
+        client = client_from_org(providers)
+    except LlmError as e:
         return ReviewResult(summary="", findings=[], error=str(e))
 
     user_parts = []
@@ -66,7 +66,8 @@ async def review(code: str, language: str | None = None, context: str | None = N
     ]
 
     try:
-        resp = await client.chat(s.llm_model_deep, messages,
+        # 'deep' resolves via provider.role_map; falls back to a plain model name.
+        resp = await client.chat("deep", messages,
                                  response_format={"type": "json_object"})
     except LlmError as e:
         return ReviewResult(summary="", findings=[], error=str(e))

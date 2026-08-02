@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from crv_api.middleware.request_id import RequestIdMiddleware
-from crv_api.routers import admin, config, health, repos, reviews, webhooks
+from crv_api.routers import admin, config, health, providers, repos, reviews, webhooks
 from crv_api.startup import ensure_default_org
 from crv_core.settings import get_settings
 
@@ -39,6 +39,7 @@ def create_app() -> FastAPI:
     app.include_router(reviews.router, prefix="/api/v1")
     app.include_router(config.router, prefix="/api/v1")
     app.include_router(admin.router, prefix="/api/v1")
+    app.include_router(providers.router, prefix="/api/v1")
     return app
 
 
