@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "crv.fullname" . }}-api
+  labels: {{- include "crv.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.api.service.type }}
+  ports:
+    - port: {{ .Values.api.service.port }}
+      targetPort: 8080
+  selector: {{- include "crv.selectorLabels" . | nindent 4 }}

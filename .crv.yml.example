@@ -1,0 +1,34 @@
+# .crv.yml — per-repo config. Commit this to your repo's default branch.
+# See plan.md §14 for the full precedence rules.
+
+review:
+  block_severity: high
+  categories: [security, bug, performance]
+  min_confidence: 0.7
+  drafts: false
+  guidelines: |
+    Prefer async SQLAlchemy 2.0 over sync.
+    New HTTP clients must use httpx, not requests.
+
+bypass:
+  roles: [admin, maintain]
+  require_second_approver_for: [critical]
+
+exclude_paths:
+  - "vendor/**"
+  - "**/*.generated.*"
+  - "migrations/**/*.sql"
+
+hotspots:
+  count: 150
+  extra:
+    - "src/security/**"
+    - "src/payments/**"
+
+weekly:
+  schedule: "0 6 * * MON"
+  auto_promote_baseline: false
+  channels:
+    - ui
+    - forge_issue
+    # - "webhook:https://hooks.slack.com/services/..."

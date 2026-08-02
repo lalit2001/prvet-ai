@@ -1,0 +1,6 @@
+apiVersion: v2
+name: codereview
+description: Sentry Review (crv) — self-hosted AI code review
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

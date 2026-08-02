@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "crv.fullname" . }}-worker
+  labels: {{- include "crv.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.worker.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "crv.name" . }}
+      app.kubernetes.io/component: worker
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "crv.name" . }}
+        app.kubernetes.io/component: worker
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      serviceAccountName: {{ include "crv.fullname" . }}
+      containers:
+        - name: worker
+          image: "{{ .Values.image.repository }}/crv-worker:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          envFrom:
+            - secretRef: { name: {{ include "crv.fullname" . }}-secrets }
+          env:
+            - name: DATABASE_URL
+              value: {{ .Values.postgres.external.dsn | default (printf "postgresql+asyncpg://crv:crv@%s-postgres:5432/crv" (include "crv.fullname" .)) | quote }}
+            - name: QUEUE_URL
+              value: {{ .Values.queue.external | default (printf "redis://%s-redis:6379/0" (include "crv.fullname" .)) | quote }}
+            - name: LLM_BASE_URL
+              value: {{ .Values.llm.baseUrl | quote }}
+          resources: {{- toYaml .Values.worker.resources | nindent 12 }}

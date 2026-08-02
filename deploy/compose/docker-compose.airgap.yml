@@ -1,0 +1,6 @@
+# Airgap override:
+#   docker compose -f docker-compose.yml -f docker-compose.airgap.yml up -d
+# Drops LiteLLM; expects LLM_BASE_URL to point at an internal endpoint.
+services:
+  litellm:
+    profiles: ["disabled"]

@@ -1,0 +1,62 @@
+image:
+  repository: ghcr.io/sentry-review
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+api:
+  replicas: 2
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits:   { cpu: 500m, memory: 512Mi }
+  service: { type: ClusterIP, port: 8080 }
+  ingress:
+    enabled: true
+    className: nginx
+    host: crv.example.com
+
+worker:
+  replicas: 2
+  resources:
+    requests: { cpu: 500m, memory: 1Gi }
+    limits:   { cpu: 2,    memory: 4Gi }
+  scale:
+    keda: false          # true = use KEDA on queue depth; false = HPA on CPU
+    minReplicas: 1
+    maxReplicas: 10
+
+web:
+  replicas: 1
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits:   { cpu: 200m, memory: 128Mi }
+  service: { type: ClusterIP, port: 80 }
+  ingress:
+    enabled: true
+    className: nginx
+    host: crv.example.com
+
+postgres:
+  external:
+    dsn: ""             # set this to skip the bundled Postgres; production expects it
+  # If external.dsn is empty, a bundled Postgres is deployed (evaluation only).
+  bundled:
+    storageSize: 20Gi
+
+queue:
+  external: ""          # e.g. "redis://redis.default.svc:6379/0" — else bundled Redis is deployed
+
+llm:
+  baseUrl: "https://api.openai.com/v1"
+  apiKeyRef: "openai-key"    # key in the k8s Secret below
+  modelFast: "gpt-4o-mini"
+  modelDeep: "claude-sonnet-4-6"
+
+secrets:
+  create: true
+  # For production, use external-secrets-operator instead. Keys must include
+  # everything LLM_API_KEY_REF, forge tokens, etc. point at.
+  data: {}
+
+airgap:
+  enabled: false
+  # values.airgap.yaml adds: registry rewrites, disables ingress on public LBs, etc.

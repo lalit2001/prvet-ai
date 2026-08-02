@@ -1,0 +1,21 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "crv.fullname" . }}-migrate-{{ .Release.Revision }}
+  labels: {{- include "crv.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: "{{ .Values.image.repository }}/crv-api:{{ .Values.image.tag }}"
+          command: ["alembic", "-c", "/app/migrations/alembic.ini", "upgrade", "head"]
+          env:
+            - name: DATABASE_URL
+              value: {{ .Values.postgres.external.dsn | default (printf "postgresql+asyncpg://crv:crv@%s-postgres:5432/crv" (include "crv.fullname" .)) | quote }}

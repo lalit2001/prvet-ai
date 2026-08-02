@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sentry-review.dev/schemas/custom-rule.schema.json",
+  "title": "Sentry Review Custom Rule",
+  "type": "object",
+  "required": ["id", "language", "severity", "category", "message", "pattern"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]+$" },
+    "language": { "enum": ["python", "javascript", "typescript", "java", "go", "csharp", "ruby", "php", "rust", "kotlin", "c", "cpp"] },
+    "severity": { "enum": ["critical", "high", "medium", "low", "info"] },
+    "category": { "enum": ["security", "bug", "performance", "maintainability", "style", "dependency", "test"] },
+    "message": { "type": "string", "maxLength": 500 },
+    "pattern": { "type": "string" },
+    "pattern_not": { "type": "string" },
+    "fix": { "type": "string" },
+    "enabled": { "type": "boolean", "default": true }
+  },
+  "additionalProperties": false
+}

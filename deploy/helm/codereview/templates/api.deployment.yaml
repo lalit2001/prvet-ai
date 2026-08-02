@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "crv.fullname" . }}-api
+  labels: {{- include "crv.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.api.replicas }}
+  selector:
+    matchLabels: {{- include "crv.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "crv.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "crv.fullname" . }}
+      containers:
+        - name: api
+          image: "{{ .Values.image.repository }}/crv-api:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports: [{ containerPort: 8080 }]
+          envFrom:
+            - secretRef: { name: {{ include "crv.fullname" . }}-secrets }
+          env:
+            - name: DATABASE_URL
+              value: {{ .Values.postgres.external.dsn | default (printf "postgresql+asyncpg://crv:crv@%s-postgres:5432/crv" (include "crv.fullname" .)) | quote }}
+            - name: QUEUE_URL
+              value: {{ .Values.queue.external | default (printf "redis://%s-redis:6379/0" (include "crv.fullname" .)) | quote }}
+            - name: LLM_BASE_URL
+              value: {{ .Values.llm.baseUrl | quote }}
+            - name: LLM_API_KEY_REF
+              value: {{ .Values.llm.apiKeyRef | quote }}
+            - name: LLM_MODEL_FAST
+              value: {{ .Values.llm.modelFast | quote }}
+            - name: LLM_MODEL_DEEP
+              value: {{ .Values.llm.modelDeep | quote }}
+          readinessProbe:
+            httpGet: { path: /readyz, port: 8080 }
+            initialDelaySeconds: 3
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 10
+          resources: {{- toYaml .Values.api.resources | nindent 12 }}
