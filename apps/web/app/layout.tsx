@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Script from "next/script";
+import Nav from "@/components/Nav";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -14,7 +15,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {/* config.js is written at deploy time — see plan.md F9 AC9.2. */}
         <Script src="/config.js" strategy="beforeInteractive" />
       </head>
-      <body>{children}</body>
+      <body><Nav />{children}</body>
     </html>
   );
 }

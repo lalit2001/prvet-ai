@@ -38,7 +38,8 @@ async def receive_webhook(connection_id: UUID, request: Request):
             # AC1.1 — audit + 401, nothing enqueued
             await db.execute(
                 text("""INSERT INTO audit_log (org_id, actor_type, action, resource_type, resource_id, metadata)
-                        SELECT org_id, 'forge', 'webhook.signature_invalid', 'forge_connection', :cid::text, '{}'::jsonb
+                        SELECT org_id, 'forge', 'webhook.signature_invalid', 'forge_connection',
+                               CAST(:cid AS text), CAST('{}' AS jsonb)
                         FROM forge_connections WHERE id = :cid"""),
                 {"cid": str(connection_id)},
             )
