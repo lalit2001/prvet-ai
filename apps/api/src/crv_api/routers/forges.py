@@ -97,10 +97,34 @@ async def list_forges() -> list[dict]:
     async with session_factory()() as db:
         rows = (await db.execute(text("""
             SELECT id::text, forge_type, display_name, base_url,
-                   capabilities->>'github_user' AS github_user, status, created_at
+                   capabilities->>'github_user' AS github_user,
+                   capabilities->>'webhook_base_url' AS webhook_base_url,
+                   status, created_at
             FROM forge_connections ORDER BY created_at DESC
         """))).mappings().all()
     return [dict(r) for r in rows]
+
+
+class WebhookBaseIn(BaseModel):
+    webhook_base_url: str
+
+
+@router.put("/forges/{cid}/webhook-base")
+async def set_webhook_base(cid: str, body: WebhookBaseIn) -> dict:
+    """Persist the ngrok / public URL base on the connection so the user
+    doesn't have to re-enter it every time they enable a repo."""
+    base = body.webhook_base_url.rstrip("/")
+    async with session_factory()() as db:
+        r = await db.execute(text("""
+            UPDATE forge_connections
+              SET capabilities = jsonb_set(COALESCE(capabilities, '{}'::jsonb),
+                                            '{webhook_base_url}', to_jsonb(CAST(:b AS text)))
+              WHERE id = :id
+        """), {"b": base, "id": cid})
+        if r.rowcount == 0:
+            raise HTTPException(404, "connection not found")
+        await db.commit()
+    return {"webhook_base_url": base}
 
 
 @router.delete("/forges/{cid}", status_code=204)
@@ -144,8 +168,16 @@ async def enable_repo(cid: str, body: RepoIn) -> RepoEnableOut:
     if status != 200 or not isinstance(repo_meta, dict):
         raise HTTPException(status, f"cannot access {body.full_name}: {str(repo_meta)[:200]}")
 
+    # Persist the webhook base URL on the connection for future reuse.
+    base = body.webhook_url.split("/api/v1/webhooks/")[0].rstrip("/") if "/api/v1/webhooks/" in body.webhook_url else body.webhook_url.rstrip("/")
     async with session_factory()() as db:
         org_id = (await db.execute(text("SELECT id FROM organizations WHERE slug='default'"))).scalar_one()
+        await db.execute(text("""
+            UPDATE forge_connections
+              SET capabilities = jsonb_set(COALESCE(capabilities, '{}'::jsonb),
+                                            '{webhook_base_url}', to_jsonb(CAST(:b AS text)))
+              WHERE id = :id
+        """), {"b": base, "id": cid})
         # Insert repositories row (idempotent per connection+external_id)
         repo_id = str(uuid.uuid4())
         await db.execute(text("""

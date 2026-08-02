@@ -18,6 +18,24 @@ from crv_core.settings import get_settings
 router = APIRouter()
 
 
+async def _resolve_secret(ref: str, capabilities: dict) -> str:
+    """`gh:conn:<id>:secret` and `gh:conn:<id>:token` refs live in the
+    connection's capabilities JSONB (dev). Anything else goes through
+    the configured SecretsAdapter."""
+    if ref.startswith("gh:conn:"):
+        if ref.endswith(":secret"):
+            v = capabilities.get("dev_webhook_secret")
+            if not v:
+                raise HTTPException(500, "connection is missing webhook secret")
+            return v
+        if ref.endswith(":token"):
+            v = capabilities.get("dev_token")
+            if not v:
+                raise HTTPException(500, "connection is missing token")
+            return v
+    return await get_secrets(get_settings().secrets_backend).get(ref)
+
+
 @router.post("/webhooks/{connection_id}", status_code=status.HTTP_202_ACCEPTED)
 async def receive_webhook(connection_id: UUID, request: Request):
     body = await request.body()
@@ -25,15 +43,14 @@ async def receive_webhook(connection_id: UUID, request: Request):
 
     async with session_factory()() as db:
         conn = (await db.execute(
-            text("SELECT forge_type, webhook_secret_ref FROM forge_connections WHERE id = :id AND status = 'active'"),
+            text("SELECT forge_type, webhook_secret_ref, capabilities FROM forge_connections WHERE id = :id AND status = 'active'"),
             {"id": str(connection_id)},
         )).mappings().first()
         if conn is None:
             raise HTTPException(status_code=404, detail="unknown connection")
 
         adapter = get_adapter(conn["forge_type"])
-        secrets = get_secrets(get_settings().secrets_backend)
-        secret = await secrets.get(conn["webhook_secret_ref"])
+        secret = await _resolve_secret(conn["webhook_secret_ref"], conn["capabilities"] or {})
         if not await adapter.verify_webhook(headers, body, secret):
             # AC1.1 — audit + 401, nothing enqueued
             await db.execute(
