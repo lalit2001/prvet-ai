@@ -10,9 +10,10 @@ import {
 
 const TYPES: { id: ProviderType; label: string; hint: string }[] = [
   { id: "openai", label: "OpenAI", hint: "api.openai.com" },
-  { id: "anthropic", label: "Anthropic", hint: "api.anthropic.com" },
-  { id: "azure_openai", label: "Azure OpenAI", hint: "your Azure endpoint + deployments" },
-  { id: "bedrock", label: "AWS Bedrock", hint: "Claude/Titan/Llama on Bedrock" },
+  { id: "anthropic", label: "Anthropic (or Azure /anthropic)", hint: "anthropic.com — or Azure AI Foundry /anthropic endpoint" },
+  { id: "azure_openai", label: "Azure OpenAI (GPT only)", hint: "for GPT / embeddings — role_map values must be Azure deployment names" },
+  { id: "azure_ai", label: "Azure AI Foundry", hint: "for Claude / Llama / Mistral / DeepSeek on Azure" },
+  { id: "bedrock", label: "AWS Bedrock", hint: "Claude / Titan / Llama on Bedrock" },
   { id: "vertex_ai", label: "Google Vertex AI", hint: "Gemini / PaLM on GCP" },
   { id: "ollama", label: "Ollama (local)", hint: "self-hosted, no key" },
   { id: "vllm", label: "vLLM (self-hosted)", hint: "any GPU-served OSS model" },
@@ -141,8 +142,9 @@ export default function ProvidersPage() {
 function providerSummary(p: Provider): string {
   switch (p.type) {
     case "openai": return "api.openai.com";
-    case "anthropic": return "api.anthropic.com";
+    case "anthropic": return p.base_url || "api.anthropic.com";
     case "azure_openai": return p.endpoint || "no endpoint set";
+    case "azure_ai": return p.endpoint || "no endpoint set";
     case "bedrock": return `region ${p.region || "us-east-1"}`;
     case "vertex_ai": return `${p.project || "no project"} / ${p.location || "us-central1"}`;
     case "ollama": return p.base_url || "http://localhost:11434";
@@ -204,20 +206,54 @@ function ProviderForm({ draft, setDraft }: { draft: Provider; setDraft: (p: Prov
 
 function TypeSpecific({ draft, set }: { draft: Provider; set: <K extends keyof Provider>(k: K, v: Provider[K]) => void }) {
   const t = draft.type;
-  if (t === "openai" || t === "anthropic") {
-    return <F label={`${t === "openai" ? "OpenAI" : "Anthropic"} API key`}>
+  if (t === "openai") {
+    return <F label="OpenAI API key">
       <input type="password" value={draft.api_key || ""} onChange={e => set("api_key", e.target.value)}
         className="w-full px-3 py-2 text-sm mono" placeholder="sk-..." />
     </F>;
   }
+  if (t === "anthropic") {
+    return (<>
+      <F label="Anthropic API key">
+        <input type="password" value={draft.api_key || ""} onChange={e => set("api_key", e.target.value)}
+          className="w-full px-3 py-2 text-sm mono" placeholder="sk-ant-... or your Azure key" />
+      </F>
+      <F label="Base URL (optional — leave blank for anthropic.com)">
+        <input value={draft.base_url || ""} onChange={e => set("base_url", e.target.value)}
+          className="w-full px-3 py-2 text-sm mono"
+          placeholder="e.g. https://<resource>.services.ai.azure.com/anthropic" />
+        <p className="mt-1 text-[11px] text-text-3">
+          Set this to point at Azure AI Foundry's <code className="mono">/anthropic</code> route.
+          Use plain Anthropic model ids in role_map (e.g. <code className="mono">claude-sonnet-4-6</code>).
+        </p>
+      </F>
+    </>);
+  }
   if (t === "azure_openai") {
     return (<>
+      <div className="rounded-md border border-yellow-900/60 bg-yellow-950/20 p-2 text-[11px] text-yellow-200">
+        <b>Azure OpenAI is for GPT / embeddings only.</b> If you're deploying Claude, Llama, Mistral, or DeepSeek on Azure, switch the provider type to <b>Azure AI Foundry</b> (or use <b>Anthropic</b> with a custom base URL if your endpoint is <code className="mono">.../anthropic</code>).
+      </div>
       <div className="grid gap-3 md:grid-cols-2">
         <F label="Endpoint"><input value={draft.endpoint || ""} onChange={e => set("endpoint", e.target.value)} placeholder="https://your-resource.openai.azure.com" className="w-full px-3 py-2 text-sm" /></F>
-        <F label="API version"><input value={draft.api_version || ""} onChange={e => set("api_version", e.target.value)} placeholder="2024-06-01" className="w-full px-3 py-2 text-sm mono" /></F>
+        <F label="API version"><input value={draft.api_version || ""} onChange={e => set("api_version", e.target.value)} placeholder="2024-10-21" className="w-full px-3 py-2 text-sm mono" /></F>
       </div>
       <F label="API key"><input type="password" value={draft.api_key || ""} onChange={e => set("api_key", e.target.value)} className="w-full px-3 py-2 text-sm mono" /></F>
-      <p className="text-[11px] text-text-3">Role models below use the Azure <b>deployment name</b>, not the underlying model id.</p>
+      <p className="text-[11px] text-text-3">Role models below use your Azure <b>deployment name</b>, not the underlying model id.</p>
+    </>);
+  }
+  if (t === "azure_ai") {
+    return (<>
+      <F label="Endpoint">
+        <input value={draft.endpoint || ""} onChange={e => set("endpoint", e.target.value)}
+          placeholder="https://<resource>.services.ai.azure.com/models" className="w-full px-3 py-2 text-sm mono" />
+        <p className="mt-1 text-[11px] text-text-3">
+          Azure AI Foundry endpoint. We add <code className="mono">/models</code> if missing.
+          For Claude via the Anthropic-compat route (URL ends with <code className="mono">/anthropic</code>), use the <b>Anthropic</b> provider type instead.
+        </p>
+      </F>
+      <F label="API key"><input type="password" value={draft.api_key || ""} onChange={e => set("api_key", e.target.value)} className="w-full px-3 py-2 text-sm mono" /></F>
+      <p className="text-[11px] text-text-3">Role_map values must match the Foundry catalog exactly, e.g. <code className="mono">Claude-Sonnet-4-6</code>, <code className="mono">Meta-Llama-3.1-70B-Instruct</code>, <code className="mono">DeepSeek-R1</code>.</p>
     </>);
   }
   if (t === "bedrock") {
@@ -259,7 +295,9 @@ function F({ label, children }: { label: string; children: React.ReactNode }) {
 function fastHint(t: ProviderType) {
   return {
     openai: "gpt-4o-mini", anthropic: "claude-haiku-4-5-20251001",
-    azure_openai: "your-fast-deployment", bedrock: "anthropic.claude-3-5-haiku-20241022-v1:0",
+    azure_openai: "your-fast-deployment",
+    azure_ai: "Claude-Haiku-4-5",
+    bedrock: "anthropic.claude-3-5-haiku-20241022-v1:0",
     vertex_ai: "gemini-1.5-flash", ollama: "llama3.1:8b",
     vllm: "meta-llama/Llama-3.1-8B-Instruct", litellm: "gpt-4o-mini", openai_compatible: "your-model",
   }[t];
@@ -267,7 +305,9 @@ function fastHint(t: ProviderType) {
 function deepHint(t: ProviderType) {
   return {
     openai: "gpt-4o", anthropic: "claude-sonnet-4-6",
-    azure_openai: "your-deep-deployment", bedrock: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+    azure_openai: "your-deep-deployment",
+    azure_ai: "Claude-Sonnet-4-6",
+    bedrock: "anthropic.claude-3-5-sonnet-20241022-v2:0",
     vertex_ai: "gemini-1.5-pro", ollama: "llama3.1:70b",
     vllm: "meta-llama/Llama-3.1-70B-Instruct", litellm: "claude-sonnet-4-6", openai_compatible: "your-model",
   }[t];
@@ -275,7 +315,9 @@ function deepHint(t: ProviderType) {
 function embedHint(t: ProviderType) {
   return {
     openai: "text-embedding-3-small", anthropic: "",
-    azure_openai: "your-embed-deployment", bedrock: "amazon.titan-embed-text-v2:0",
+    azure_openai: "your-embed-deployment",
+    azure_ai: "text-embedding-3-large",
+    bedrock: "amazon.titan-embed-text-v2:0",
     vertex_ai: "textembedding-gecko@003", ollama: "nomic-embed-text",
     vllm: "BAAI/bge-large-en-v1.5", litellm: "text-embedding-3-small", openai_compatible: "",
   }[t];

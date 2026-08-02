@@ -66,7 +66,7 @@ export type Run = {
 };
 
 export type ProviderType =
-  | "openai" | "anthropic" | "azure_openai" | "bedrock"
+  | "openai" | "anthropic" | "azure_openai" | "azure_ai" | "bedrock"
   | "vertex_ai" | "ollama" | "vllm" | "litellm" | "openai_compatible";
 
 export type Provider = {
