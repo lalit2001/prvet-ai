@@ -12,6 +12,7 @@ metrics (complexity, coupling), embeddings.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from datetime import datetime, timezone
@@ -106,6 +107,32 @@ async def run(ctx, repo_id: str, local_path: str, commit_sha: str,
                 "s": json.dumps(stats, default=str)})
         await db.commit()
 
+    try:
+        return await _do_baseline(run_id, repo_id, commit_sha, root, stats, started, settings)
+    except asyncio.CancelledError:
+        await _mark_failed(run_id, "task cancelled — process restart? see plan.md dev notes")
+        raise
+    except Exception as e:
+        import traceback
+        await _mark_failed(run_id, f"{type(e).__name__}: {e}\n" + traceback.format_exc()[:1500])
+        return {"status": "failed", "run_id": run_id, "error": str(e), **stats}
+
+
+async def _mark_failed(run_id: str, err_msg: str) -> None:
+    try:
+        async with session_factory()() as db:
+            await db.execute(text("""
+                UPDATE runs SET status='failed', finished_at=now(),
+                                error=CAST(:e AS jsonb)
+                  WHERE id=:id
+            """), {"id": run_id, "e": json.dumps({"message": err_msg})})
+            await db.commit()
+    except Exception as inner:
+        print(f"[baseline] failed to mark run {run_id} as failed: {inner}")
+
+
+async def _do_baseline(run_id: str, repo_id: str, commit_sha: str,
+                        root: Path, stats: dict, started: datetime, settings) -> dict:
     # ── Phase 1: index ─────────────────────────────────────────────────────
     indexed: list[dict] = []  # for hotspot ranking
     async with session_factory()() as db:

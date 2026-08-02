@@ -9,13 +9,16 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from crv_api.middleware.request_id import RequestIdMiddleware
 from crv_api.routers import admin, config, forges, health, providers, repos, reviews, webhooks
-from crv_api.startup import ensure_default_org
+from crv_api.startup import clean_stale_runs, ensure_default_org
 from crv_core.settings import get_settings
 
 
 @contextlib.asynccontextmanager
 async def _lifespan(app: FastAPI):
     await ensure_default_org()
+    n = await clean_stale_runs()
+    if n:
+        print(f"[startup] marked {n} stale running/queued runs as failed")
     yield
 
 
