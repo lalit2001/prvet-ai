@@ -17,7 +17,7 @@ Self-hosted AI code review that ships with your codebase, not with your source c
 cp deploy/compose/.env.example .env
 # edit .env: LLM_BASE_URL, LLM_API_KEY, forge token
 docker compose --project-directory deploy/compose up -d
-open http://localhost:3000
+open http://localhost:3737
 ```
 
 ## Repo layout
