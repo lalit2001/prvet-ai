@@ -103,6 +103,7 @@ export const api = {
     getConfig: (id: string) => req<RepoConfig>(`/api/v1/repos/${id}/config`),
     putConfig: (id: string, cfg: RepoConfig) =>
       req<RepoConfig>(`/api/v1/repos/${id}/config`, { method: "PUT", body: JSON.stringify(cfg) }),
+    remove: (id: string) => req<void>(`/api/v1/repos/${id}`, { method: "DELETE" }),
   },
 
   reviews: {

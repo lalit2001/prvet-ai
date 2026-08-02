@@ -1,6 +1,6 @@
 "use client";
 
-import { FolderGit2, Plus, Search } from "lucide-react";
+import { FolderGit2, Plus, Search, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { api, type Repo } from "@/lib/api";
@@ -39,6 +39,15 @@ export default function ReposPage() {
       refresh();
     } catch (e) { toast({ kind: "error", msg: String(e) }); }
     finally { setBusy(false); }
+  }
+
+  async function deleteRepo(r: Repo) {
+    if (!confirm(`Delete ${r.full_name}? This removes the repo and all its runs, baselines, and findings.`)) return;
+    try {
+      await api.repos.remove(r.id);
+      toast({ kind: "success", msg: `Deleted ${r.full_name}` });
+      refresh();
+    } catch (e) { toast({ kind: "error", msg: String(e) }); }
   }
 
   return (
@@ -85,7 +94,12 @@ export default function ReposPage() {
                       </span>
                     </TD>
                     <TD className="text-right">
-                      <Link href={`/repo?id=${r.id}`} className="text-emerald-400 hover:underline text-xs">Open →</Link>
+                      <div className="inline-flex items-center gap-2">
+                        <Link href={`/repo?id=${r.id}`} className="text-emerald-400 hover:underline text-xs">Open →</Link>
+                        <Button variant="danger" size="sm" onClick={() => deleteRepo(r)}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                     </TD>
                   </TR>
                 ))}
