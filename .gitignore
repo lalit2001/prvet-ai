@@ -35,6 +35,10 @@ crv.config.yaml
 
 # IDE
 .idea/
+# ...but share IDE run configs and inspection profiles across the team
+!.idea/runConfigurations/
+!.idea/inspectionProfiles/
+!.idea/codeStyles/
 .vscode/
 *.swp
 
