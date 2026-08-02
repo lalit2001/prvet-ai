@@ -97,7 +97,7 @@ async def delete_repo(repo_id: str) -> None:
 
 
 @router.post("/repos/{repo_id}/baseline", response_model=TriggerOut)
-async def trigger_baseline(repo_id: str) -> TriggerOut:
+async def trigger_baseline(repo_id: str, force: bool = False) -> TriggerOut:
     """Local repos: use config.local_path.
     GitHub repos: shallow-clone into a working dir under STORAGE_URI, then baseline."""
     async with session_factory()() as db:
@@ -139,7 +139,8 @@ async def trigger_baseline(repo_id: str) -> TriggerOut:
 
     sha = _head_sha(local_path)
     from crv_worker.jobs.baseline import run as baseline_run
-    result = await baseline_run(None, repo_id=repo_id, local_path=local_path, commit_sha=sha)
+    result = await baseline_run(None, repo_id=repo_id, local_path=local_path,
+                                 commit_sha=sha, force=force)
     if result["status"] != "succeeded":
         raise HTTPException(500, result)
     return TriggerOut(

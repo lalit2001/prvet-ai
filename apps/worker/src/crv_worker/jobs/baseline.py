@@ -29,7 +29,8 @@ def _extract(path: Path, mkey: str, lang: str):
     return treesitter.extract_symbols(path, mkey)
 
 
-async def run(ctx, repo_id: str, local_path: str, commit_sha: str) -> dict:
+async def run(ctx, repo_id: str, local_path: str, commit_sha: str,
+              force: bool = False) -> dict:
     root = Path(local_path).resolve()
     if not root.is_dir():
         return {"status": "failed", "error": f"not a directory: {root}"}
@@ -39,13 +40,20 @@ async def run(ctx, repo_id: str, local_path: str, commit_sha: str) -> dict:
                    "symbols": 0, "by_language": {}}
     started = datetime.now(timezone.utc)
 
+    key = f"baseline:v2:{repo_id}:{commit_sha}"
+    if force:
+        # Nuke the prior successful run for this key so the fresh INSERT can proceed.
+        async with session_factory()() as db:
+            await db.execute(text("DELETE FROM runs WHERE idempotency_key = :key"), {"key": key})
+            await db.commit()
+
     async with session_factory()() as db:
         # Idempotency: same repo+commit → return the existing baseline. PRD F4.
         existing = (await db.execute(text("""
             SELECT r.id::text AS run_id, r.stats, b.id::text AS baseline_id
             FROM runs r LEFT JOIN baselines b ON b.run_id = r.id
             WHERE r.idempotency_key = :key AND r.status = 'succeeded'
-        """), {"key": f"baseline:{repo_id}:{commit_sha}"})).mappings().one_or_none()
+        """), {"key": key})).mappings().one_or_none()
         if existing:
             s = existing["stats"] or {}
             return {"status": "succeeded", "cached": True,
@@ -59,8 +67,7 @@ async def run(ctx, repo_id: str, local_path: str, commit_sha: str) -> dict:
             INSERT INTO runs (id, repo_id, run_type, trigger, status, commit_sha,
                               idempotency_key, started_at, stats)
             VALUES (:id, :rid, 'baseline', 'api', 'running', :sha, :key, now(), '{}')
-        """), {"id": run_id, "rid": repo_id, "sha": commit_sha,
-               "key": f"baseline:{repo_id}:{commit_sha}"})
+        """), {"id": run_id, "rid": repo_id, "sha": commit_sha, "key": key})
         await db.commit()
 
         for path in walk(root):

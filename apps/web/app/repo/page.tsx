@@ -63,14 +63,14 @@ function RepoInner() {
 
   if (!id) return <EmptyState icon={AlertOctagon} title="No repo selected" hint="Pick one from the Repositories page." />;
 
-  async function runBaseline() {
+  async function runBaseline(force = false) {
     setBusy("baseline");
     try {
-      const b = await api.repos.baseline(id);
+      const b = await api.repos.baseline(id, force);
       setBaseline(b);
       const langBreakdown = Object.entries(b.by_language || {}).map(([k, v]) => `${v} ${k}`).join(", ");
       if (b.cached) {
-        toast({ kind: "info", msg: `Cached — same commit already baselined (${b.files_indexed} files)` });
+        toast({ kind: "info", msg: `Cached — same commit already baselined (${b.files_indexed} files). Click 'Re-run' to force a fresh scan.` });
       } else if (b.files_indexed === 0) {
         toast({ kind: "info",
                 msg: `Walked ${b.files_seen} files; indexed 0. No supported languages found (Python + JS/TS/TSX).` });
@@ -146,7 +146,18 @@ function RepoInner() {
           <Card>
             <CardHeader title="Baseline analysis"
               subtitle="Walk the repo, extract symbols (Python via ast, JS/TS/TSX via tree-sitter), snapshot the graph"
-              action={<Button onClick={runBaseline} disabled={busy !== "idle"}>{busy === "baseline" ? "Running…" : "Run baseline"}</Button>} />
+              action={
+                <div className="flex gap-2">
+                  <Button onClick={() => runBaseline(false)} disabled={busy !== "idle"}>
+                    {busy === "baseline" ? "Running…" : "Run baseline"}
+                  </Button>
+                  {baseline && (
+                    <Button variant="secondary" onClick={() => runBaseline(true)} disabled={busy !== "idle"}>
+                      Re-run (force)
+                    </Button>
+                  )}
+                </div>
+              } />
             <CardBody>
               {baseline ? (
                 <>
