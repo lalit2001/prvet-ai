@@ -34,7 +34,7 @@ crv.config.yaml
 *.sqlite
 
 # IDE
-.idea/
+.idea/*
 # ...but share IDE run configs and inspection profiles across the team
 !.idea/runConfigurations/
 !.idea/inspectionProfiles/

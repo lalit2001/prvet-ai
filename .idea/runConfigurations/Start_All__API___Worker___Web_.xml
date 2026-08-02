@@ -1,0 +1,8 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Start All" type="CompoundRunConfigurationType">
+    <toRun name="API" type="PythonConfigurationType" />
+    <toRun name="Worker" type="PythonConfigurationType" />
+    <toRun name="Web" type="js.build_tools.npm" />
+    <method v="2" />
+  </configuration>
+</component>
