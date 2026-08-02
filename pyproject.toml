@@ -13,6 +13,7 @@ dev = [
     "mypy>=1.11",
     "import-linter>=2.0",
     "testcontainers[postgres,redis]>=4.7",
+    "psycopg2-binary>=2.9.12",
 ]
 
 [tool.uv.workspace]
