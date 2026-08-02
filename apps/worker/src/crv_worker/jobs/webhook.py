@@ -1,8 +1,4 @@
-"""Webhook fan-out job.
-
-M1: log-only. Marks webhook_events.processed_at.
-M3: dispatch to pr_review / baseline / weekly per event_type.
-"""
+"""Webhook fan-out job — routes pull_request events to pr_review."""
 from __future__ import annotations
 
 from sqlalchemy import text
@@ -12,12 +8,32 @@ from crv_core.db import session_factory
 
 async def handle_forge_event(ctx, connection_id: str, external_event_id: str, event_type: str) -> dict:
     async with session_factory()() as db:
-        await db.execute(
+        row = (await db.execute(
             text("""UPDATE webhook_events SET processed_at = now()
-                    WHERE connection_id = :cid AND external_event_id = :eid"""),
+                    WHERE connection_id = :cid AND external_event_id = :eid
+                    RETURNING payload"""),
             {"cid": connection_id, "eid": external_event_id},
-        )
+        )).mappings().one_or_none()
         await db.commit()
-    # ponytail: real dispatch (pr_review vs baseline vs weekly) lands with M2/M3
-    print(f"[handle_forge_event] connection={connection_id} event={event_type} id={external_event_id}")
-    return {"connection_id": connection_id, "event_type": event_type, "external_event_id": external_event_id}
+    if row is None:
+        return {"connection_id": connection_id, "event_type": event_type, "status": "no_payload"}
+
+    payload = row["payload"] or {}
+
+    # GitHub pull_request event → enqueue pr_review
+    if event_type == "pull_request":
+        action = payload.get("action")
+        if action in ("opened", "reopened", "synchronize"):
+            pr = payload.get("pull_request", {})
+            repo = payload.get("repository", {})
+            pr_number = pr.get("number")
+            repo_full_name = repo.get("full_name")
+            if pr_number and repo_full_name:
+                # Enqueue pr_review — arq lookup by name is by function __qualname__.
+                # Since we imported pr_review into WorkerSettings.functions, arq registers it as "run".
+                # Use direct in-process call for now (M4 refactor moves to arq pool.enqueue).
+                from crv_worker.jobs.pr_review import run as pr_run
+                return await pr_run(ctx, connection_id=connection_id, pr_number=pr_number,
+                                     repo_full_name=repo_full_name)
+    print(f"[handle_forge_event] connection={connection_id} event={event_type} — no dispatch")
+    return {"connection_id": connection_id, "event_type": event_type, "status": "no_dispatch"}

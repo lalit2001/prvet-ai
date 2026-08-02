@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 from arq.connections import RedisSettings
 
 from crv_core.settings import get_settings
-from crv_worker.jobs import baseline
+from crv_worker.jobs import baseline, pr_review
 from crv_worker.jobs.webhook import handle_forge_event
 
 
@@ -22,7 +22,7 @@ def _redis_settings() -> RedisSettings:
 
 class WorkerSettings:
     """arq's config-class contract."""
-    functions = [handle_forge_event, baseline.run]
+    functions = [handle_forge_event, baseline.run, pr_review.run]
     redis_settings = _redis_settings()
     max_jobs = 4
     job_timeout = 900

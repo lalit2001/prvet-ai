@@ -2,8 +2,8 @@
 
 import clsx from "clsx";
 import {
-  Activity, AlertOctagon, Bot, FileCheck, FolderGit2,
-  LayoutDashboard, Play, Settings, ShieldAlert,
+  Activity, AlertOctagon, Bot, Cable, FileCheck, FolderGit2, HelpCircle,
+  LayoutDashboard, Play, Settings,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -19,11 +19,14 @@ const NAV = [
     { href: "/runs", label: "Runs", icon: Play },
   ]},
   { section: "Configure", items: [
+    { href: "/admin/forges", label: "GitHub / Forges", icon: Cable },
     { href: "/admin/providers", label: "AI Providers", icon: Bot },
     { href: "/admin/rules", label: "Rules", icon: FileCheck },
-    { href: "/admin/gate", label: "Merge Gate", icon: ShieldAlert },
     { href: "/admin/audit", label: "Audit log", icon: Activity },
     { href: "/admin", label: "Settings", icon: Settings },
+  ]},
+  { section: "Learn", items: [
+    { href: "/help", label: "Setup guide", icon: HelpCircle },
   ]},
 ] as const;
 
