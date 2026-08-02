@@ -4,8 +4,8 @@ import clsx from "clsx";
 import { AlertOctagon, ArrowLeft, Play, Settings, Zap } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useState } from "react";
-import { api, type Finding, type Repo, type RepoConfig, type ReviewResult } from "@/lib/api";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { api, type Finding, type Repo, type RepoConfig, type ReviewResult, type RunDetail } from "@/lib/api";
 import {
   Button, Card, CardBody, CardHeader, EmptyState, PageHeader,
   SeverityBadge, StatCard, StatusPill, useToast,
@@ -26,15 +26,6 @@ const TABS = [
 ] as const;
 type TabId = typeof TABS[number]["id"];
 
-type BaselineResult = {
-  files_seen: number;
-  files_indexed: number;
-  files_skipped: number;
-  symbols: number;
-  cached?: boolean;
-  by_language: Record<string, number>;
-};
-
 function RepoInner() {
   const sp = useSearchParams();
   const id = sp.get("id") || "";
@@ -43,12 +34,13 @@ function RepoInner() {
   const [tab, setTab] = useState<TabId>("overview");
   const [repo, setRepo] = useState<Repo | null>(null);
   const [findings, setFindings] = useState<Finding[]>([]);
-  const [baseline, setBaseline] = useState<BaselineResult | null>(null);
+  const [run, setRun] = useState<RunDetail | null>(null);
   const [busy, setBusy] = useState<"idle" | "baseline" | "review">("idle");
   const [code, setCode] = useState(SAMPLE);
   const [language, setLanguage] = useState("python");
   const [result, setResult] = useState<ReviewResult | null>(null);
   const [cfg, setCfg] = useState<RepoConfig | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   async function refresh() {
     if (!id) return;
@@ -58,28 +50,52 @@ function RepoInner() {
     } catch { /* ignore */ }
     try { setFindings(await api.repos.findings(id)); } catch { /* ignore */ }
     try { setCfg(await api.repos.getConfig(id)); } catch { /* ignore */ }
+    try { setRun(await api.repos.latestBaseline(id)); } catch { /* ignore */ }
   }
   useEffect(() => { refresh(); }, [id]);
 
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+
   if (!id) return <EmptyState icon={AlertOctagon} title="No repo selected" hint="Pick one from the Repositories page." />;
+
+  function startPolling() {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      try {
+        const latest = await api.repos.latestBaseline(id);
+        setRun(latest);
+        if (latest && (latest.status === "succeeded" || latest.status === "failed")) {
+          if (pollRef.current) clearInterval(pollRef.current);
+          pollRef.current = null;
+          setBusy("idle");
+          refresh();
+          if (latest.status === "succeeded") {
+            toast({ kind: "success",
+                    msg: `Baseline done · ${latest.stats.files_indexed ?? 0} files · ${latest.stats.symbols ?? 0} symbols · ${latest.findings_count} findings` });
+          } else {
+            toast({ kind: "error", msg: "Baseline failed — see Runs page" });
+          }
+        }
+      } catch { /* keep polling */ }
+    }, 2000);
+  }
 
   async function runBaseline(force = false) {
     setBusy("baseline");
     try {
       const b = await api.repos.baseline(id, force);
-      setBaseline(b);
-      const langBreakdown = Object.entries(b.by_language || {}).map(([k, v]) => `${v} ${k}`).join(", ");
       if (b.cached) {
-        toast({ kind: "info", msg: `Cached — same commit already baselined (${b.files_indexed} files). Click 'Re-run' to force a fresh scan.` });
-      } else if (b.files_indexed === 0) {
-        toast({ kind: "info",
-                msg: `Walked ${b.files_seen} files; indexed 0. No supported languages found (Python + JS/TS/TSX).` });
+        setBusy("idle");
+        toast({ kind: "info", msg: "Cached — same commit already baselined. Click 'Re-run (force)' to redo." });
+        refresh();
       } else {
-        toast({ kind: "success",
-                msg: `${b.files_indexed} of ${b.files_seen} files · ${b.symbols} symbols · ${langBreakdown}` });
+        toast({ kind: "info", msg: "Baseline started — watch the progress below." });
+        startPolling();
       }
-    } catch (e) { toast({ kind: "error", msg: String(e) }); }
-    finally { setBusy("idle"); }
+    } catch (e) {
+      toast({ kind: "error", msg: String(e) });
+      setBusy("idle");
+    }
   }
 
   async function runReview() {
@@ -93,6 +109,10 @@ function RepoInner() {
     } catch (e) { toast({ kind: "error", msg: String(e) }); }
     finally { setBusy("idle"); }
   }
+
+  const phase = run?.stats.phase;
+  const isRunning = run?.status === "running";
+  const phasePct = _phasePct(run);
 
   return (
     <>
@@ -133,56 +153,85 @@ function RepoInner() {
 
       {tab === "overview" && (
         <div className="space-y-6">
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-4">
             <StatCard icon={AlertOctagon} label="Open findings"
               value={findings.filter(f => f.status === "open").length}
               tone={findings.length > 0 ? "warn" : "success"} />
-            <StatCard icon={Zap} label="Last baseline"
-              value={baseline ? `${baseline.files_indexed}/${baseline.files_seen}` : "–"}
-              hint={baseline ? `${baseline.symbols} symbols · ${langsText(baseline.by_language)}` : "run one"} />
-            <StatCard icon={Play} label="Runs" value="—" hint="see Runs tab" />
+            <StatCard icon={Zap} label="Files indexed"
+              value={run?.stats.files_indexed ?? "–"}
+              hint={run ? `of ${run.stats.files_seen} walked` : "run baseline"} />
+            <StatCard icon={Play} label="Symbols"
+              value={run?.stats.symbols ?? "–"}
+              hint={run ? langsText(run.stats.by_language) : ""} />
+            <StatCard icon={AlertOctagon} label="Baseline spend"
+              value={run?.stats.cost_usd != null ? `$${run.stats.cost_usd.toFixed(2)}` : "$0.00"}
+              hint={run?.stats.hotspots_done != null ? `${run.stats.hotspots_done}/${run.stats.hotspots_total ?? 0} hotspots` : ""} />
           </div>
 
           <Card>
             <CardHeader title="Baseline analysis"
-              subtitle="Walk the repo, extract symbols (Python via ast, JS/TS/TSX via tree-sitter), snapshot the graph"
+              subtitle="Walk → index (Python via ast, JS/TS/TSX via tree-sitter) → LLM review top hotspots → project summary"
               action={
                 <div className="flex gap-2">
-                  <Button onClick={() => runBaseline(false)} disabled={busy !== "idle"}>
-                    {busy === "baseline" ? "Running…" : "Run baseline"}
+                  <Button onClick={() => runBaseline(false)} disabled={busy !== "idle" || isRunning}>
+                    {isRunning ? "Running…" : (busy === "baseline" ? "Starting…" : "Run baseline")}
                   </Button>
-                  {baseline && (
+                  {run && !isRunning && (
                     <Button variant="secondary" onClick={() => runBaseline(true)} disabled={busy !== "idle"}>
                       Re-run (force)
                     </Button>
                   )}
                 </div>
               } />
-            <CardBody>
-              {baseline ? (
+            <CardBody className="space-y-4">
+              {run && isRunning && (
+                <div>
+                  <div className="mb-1 flex items-center justify-between text-xs">
+                    <span className="text-text-2">Phase: <b className="text-text-1 capitalize">{phase ?? "starting"}</b></span>
+                    <span className="text-text-3">{phasePct.label}</span>
+                  </div>
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-panel-2">
+                    <div className="h-full bg-emerald-500 transition-all"
+                      style={{ width: `${phasePct.pct}%` }} />
+                  </div>
+                  <p className="mt-2 text-[11px] text-text-3">
+                    {phase === "indexing" && `Indexed ${run.stats.files_indexed ?? 0} / ${run.stats.files_seen ?? 0} files walked`}
+                    {phase === "reviewing" && `LLM-reviewing hotspot ${run.stats.hotspots_done ?? 0} / ${run.stats.hotspots_total ?? 0}`}
+                    {phase === "summarizing" && "Generating project overview…"}
+                  </p>
+                </div>
+              )}
+
+              {run && !isRunning && run.status === "succeeded" && (
                 <>
                   <div className="text-sm text-text-2">
-                    Walked <b className="text-text-1">{baseline.files_seen}</b> files ·
-                    Indexed <b className="text-text-1">{baseline.files_indexed}</b> ·
-                    Extracted <b className="text-text-1">{baseline.symbols}</b> symbols
-                    {baseline.cached && <span className="ml-2 text-xs text-text-3">(cached — same commit)</span>}
+                    Walked <b className="text-text-1">{run.stats.files_seen ?? 0}</b> · Indexed <b className="text-text-1">{run.stats.files_indexed ?? 0}</b> · Symbols <b className="text-text-1">{run.stats.symbols ?? 0}</b> · Findings <b className="text-text-1">{run.findings_count}</b> · Spend <b className="text-text-1">${(run.stats.cost_usd ?? 0).toFixed(2)}</b>
+                    {run.duration_ms != null && <span className="ml-2 text-xs text-text-3">({(run.duration_ms/1000).toFixed(1)}s)</span>}
                   </div>
-                  {Object.keys(baseline.by_language || {}).length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                      {Object.entries(baseline.by_language).map(([k, v]) => (
+                  {Object.keys(run.stats.by_language || {}).length > 0 && (
+                    <div className="flex flex-wrap gap-2 text-xs">
+                      {Object.entries(run.stats.by_language!).map(([k, v]) => (
                         <span key={k} className="rounded-md border border-border bg-panel-2 px-2 py-0.5 text-text-2">
                           <span className="mono">{k}</span>&nbsp;<span className="tabular-nums text-text-1">{v}</span>
                         </span>
                       ))}
                     </div>
                   )}
-                  {baseline.files_indexed === 0 && (
-                    <p className="mt-3 rounded-md border border-yellow-900/60 bg-yellow-950/20 p-3 text-xs text-yellow-200">
-                      Walked {baseline.files_seen} files but indexed 0 — this repo has no <code>.py / .js / .jsx / .ts / .tsx</code> files. Other Tier-1 languages (Java, Go) land next.
+                  {run.stats.summary && (
+                    <div className="rounded-md border border-emerald-900/60 bg-emerald-950/20 p-4">
+                      <div className="mb-1 text-[10px] uppercase tracking-wider text-emerald-400">Project summary</div>
+                      <p className="text-sm text-text-1 whitespace-pre-wrap">{run.stats.summary}</p>
+                    </div>
+                  )}
+                  {(run.stats.files_indexed ?? 0) === 0 && (
+                    <p className="rounded-md border border-yellow-900/60 bg-yellow-950/20 p-3 text-xs text-yellow-200">
+                      No supported languages found. Extractors cover <code>.py / .js / .jsx / .ts / .tsx</code> right now.
                     </p>
                   )}
                 </>
-              ) : (
+              )}
+
+              {!run && !isRunning && (
                 <div className="text-sm text-text-3">No baseline yet.</div>
               )}
             </CardBody>
@@ -195,7 +244,7 @@ function RepoInner() {
           <CardHeader title="Findings" subtitle={`${findings.length} total, latest first`} />
           <CardBody className="p-0">
             {findings.length === 0 ? (
-              <div className="p-8"><EmptyState icon={AlertOctagon} title="No findings" hint="Run an ad-hoc review or open a PR on this repo." /></div>
+              <div className="p-8"><EmptyState icon={AlertOctagon} title="No findings" hint="Run baseline to LLM-review hotspots, or use the Ad-hoc review tab." /></div>
             ) : (
               <ul className="divide-y divide-border">
                 {findings.map((f) => <FindingRow key={f.id} f={f} />)}
@@ -229,8 +278,7 @@ function RepoInner() {
 
       {tab === "settings" && (
         <Card>
-          <CardHeader title="Per-repo settings"
-            subtitle="Stored in repositories.config."
+          <CardHeader title="Per-repo settings" subtitle="Stored in repositories.config."
             action={<Link href={`/repo/settings?id=${id}`} className="text-xs text-emerald-400 hover:underline inline-flex items-center gap-1"><Settings className="h-3 w-3" /> Full editor →</Link>} />
           <CardBody>
             {cfg ? (
@@ -250,9 +298,26 @@ function RepoInner() {
   );
 }
 
-function langsText(by: Record<string, number>): string {
+function _phasePct(run: RunDetail | null): { pct: number; label: string } {
+  if (!run) return { pct: 0, label: "" };
+  const s = run.stats;
+  if (s.phase === "indexing") {
+    // We don't know total upfront; show a moving indicator based on files_seen % 100
+    const seen = s.files_seen ?? 0;
+    return { pct: Math.min(60, (seen % 100)), label: `${seen} walked` };
+  }
+  if (s.phase === "reviewing") {
+    const done = s.hotspots_done ?? 0;
+    const total = s.hotspots_total ?? 1;
+    return { pct: 60 + Math.min(30, (done / total) * 30), label: `${done}/${total} hotspots` };
+  }
+  if (s.phase === "summarizing") return { pct: 92, label: "summary" };
+  return { pct: 100, label: "" };
+}
+
+function langsText(by?: Record<string, number>): string {
   const entries = Object.entries(by || {});
-  if (!entries.length) return "no languages";
+  if (!entries.length) return "";
   return entries.map(([k, v]) => `${v} ${k}`).join(" · ");
 }
 

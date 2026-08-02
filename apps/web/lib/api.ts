@@ -65,6 +65,30 @@ export type Run = {
   created_at: string; finished_at: string | null;
 };
 
+export type RunDetail = {
+  id: string;
+  run_type: string;
+  status: string;
+  commit_sha: string;
+  duration_ms: number | null;
+  stats: {
+    phase?: "indexing" | "reviewing" | "summarizing" | "done";
+    files_seen?: number;
+    files_indexed?: number;
+    files_skipped?: number;
+    symbols?: number;
+    by_language?: Record<string, number>;
+    hotspots_total?: number;
+    hotspots_done?: number;
+    findings?: number;
+    cost_usd?: number;
+    summary?: string;
+  };
+  created_at: string;
+  finished_at: string | null;
+  findings_count: number;
+};
+
 export type ProviderType =
   | "openai" | "anthropic" | "azure_openai" | "azure_ai" | "bedrock"
   | "vertex_ai" | "ollama" | "vllm" | "litellm" | "openai_compatible";
@@ -96,12 +120,9 @@ export const api = {
     createLocal: (name: string, local_path: string) =>
       req<Repo>("/api/v1/repos/local", { method: "POST", body: JSON.stringify({ name, local_path }) }),
     baseline: (id: string, force = false) =>
-      req<{
-        run_id: string; baseline_id: string;
-        files_seen: number; files_indexed: number; files_skipped: number;
-        symbols: number; cached?: boolean;
-        by_language: Record<string, number>;
-      }>(`/api/v1/repos/${id}/baseline${force ? "?force=true" : ""}`, { method: "POST" }),
+      req<{ run_id: string; status: string; cached: boolean }>(
+        `/api/v1/repos/${id}/baseline${force ? "?force=true" : ""}`, { method: "POST" }),
+    latestBaseline: (id: string) => req<RunDetail | null>(`/api/v1/repos/${id}/latest-baseline`),
     findings: (id: string) => req<Finding[]>(`/api/v1/repos/${id}/findings`),
     getConfig: (id: string) => req<RepoConfig>(`/api/v1/repos/${id}/config`),
     putConfig: (id: string, cfg: RepoConfig) =>
@@ -139,5 +160,6 @@ export const api = {
     ),
     runs: () => req<Run[]>("/api/v1/runs"),
     audit: () => req<Array<Record<string, unknown>>>("/api/v1/audit"),
+    run: (run_id: string) => req<RunDetail>(`/api/v1/runs/${run_id}`),
   },
 };
