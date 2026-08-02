@@ -20,6 +20,8 @@ export type Finding = {
   title: string; body: string; file_path: string;
   start_line: number | null; end_line: number | null;
   confidence: number; status: string; created_at: string;
+  suggested_patch?: string | null;
+  resolution?: any;
 };
 
 export type ReviewResult = {
@@ -128,6 +130,9 @@ export const api = {
     putConfig: (id: string, cfg: RepoConfig) =>
       req<RepoConfig>(`/api/v1/repos/${id}/config`, { method: "PUT", body: JSON.stringify(cfg) }),
     remove: (id: string) => req<void>(`/api/v1/repos/${id}`, { method: "DELETE" }),
+    getFiles: (id: string) => req<string[]>(`/api/v1/repos/${id}/files`),
+    getFileContent: (id: string, path: string) =>
+      req<{ content: string }>(`/api/v1/repos/${id}/file-content?path=${encodeURIComponent(path)}`),
   },
 
   reviews: {
@@ -161,5 +166,40 @@ export const api = {
     runs: () => req<Run[]>("/api/v1/runs"),
     audit: () => req<Array<Record<string, unknown>>>("/api/v1/audit"),
     run: (run_id: string) => req<RunDetail>(`/api/v1/runs/${run_id}`),
+    generateRule: (description: string, language: string) =>
+      req<Partial<CustomRule>>("/api/v1/admin/rules/generate", {
+        method: "POST",
+        body: JSON.stringify({ description, language }),
+      }),
+    parseAst: (code: string, language: string) =>
+      req<{ status: string; ast?: any; error?: string }>("/api/v1/admin/ast/parse", {
+        method: "POST",
+        body: JSON.stringify({ code, language }),
+      }),
+  },
+
+  findings: {
+    get: (id: string) => req<Finding & { repo_name: string; repo_id: string; suggested_patch: string | null; resolution: any }>(`/api/v1/findings/${id}`),
+    resolve: (id: string, resolution?: any) => req<{ status: string; finding_id: string }>(`/api/v1/findings/${id}/resolve`, {
+      method: "POST",
+      body: JSON.stringify({ resolution }),
+    }),
+  },
+
+  prs: {
+    list: () => req<Array<{
+      run_id: string;
+      repo_id: string;
+      repo_name: string;
+      pr_number: number;
+      commit_sha: string;
+      title: string;
+      source_branch: string;
+      target_branch: string;
+      created_at: string;
+      findings: Finding[];
+      files_tree: Record<string, Finding[]>;
+      open_findings_count: number;
+    }>>("/api/v1/prs"),
   },
 };

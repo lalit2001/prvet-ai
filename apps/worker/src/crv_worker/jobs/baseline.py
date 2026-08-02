@@ -22,7 +22,7 @@ from sqlalchemy import text
 
 from crv_core.db import session_factory
 from crv_core.settings import get_settings
-from crv_worker.analysis.llm_review import review as llm_review
+from crv_worker.analysis.llm_review import review as llm_review, summarize_project
 from crv_worker.indexing import pyast, treesitter
 from crv_worker.indexing.persist import replace_symbols, upsert_file
 from crv_worker.indexing.walker import walk
@@ -280,11 +280,7 @@ async def _project_summary(root: Path, indexed: list[dict], stats: dict, run_id:
         (f"\n\nREADME excerpt:\n---\n{readme_body}\n---" if readme_body else "")
     )
     try:
-        result = await llm_review(code=prompt, language=None,
-                                   context="This is a project overview request, not a code review. Return a plain markdown paragraph.",
-                                   run_id=run_id)
-        # llm_review returns findings — for a summary we care about result.summary
-        return result.summary or (result.error and f"_summary skipped: {result.error}_") or ""
+        return await summarize_project(prompt, run_id=run_id)
     except Exception as e:
         return f"_summary failed: {e}_"
 

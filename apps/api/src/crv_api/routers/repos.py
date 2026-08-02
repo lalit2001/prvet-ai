@@ -237,3 +237,138 @@ def _head_sha(local_path: str) -> str:
         ).strip()
     except (subprocess.CalledProcessError, FileNotFoundError):
         return "HEAD-dev"
+
+
+@router.get("/repos/{repo_id}/files")
+async def get_repo_files(repo_id: str) -> list[str]:
+    async with session_factory()() as db:
+        row = (await db.execute(text("""
+            SELECT repo.full_name, conn.forge_type, conn.capabilities,
+                   repo.config->>'local_path' AS local_path, repo.default_branch
+            FROM repositories repo
+            JOIN forge_connections conn ON conn.id = repo.connection_id
+            WHERE repo.id = :id
+        """), {"id": repo_id})).mappings().one_or_none()
+        
+    if not row:
+        raise HTTPException(404, "Repository not found")
+        
+    supported_exts = {
+        ".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".go", ".rs",
+        ".rb", ".cs", ".php", ".kt", ".c", ".cpp", ".h", ".hpp",
+        ".sql", ".yaml", ".yml"
+    }
+    
+    if row["forge_type"] == "local":
+        local_path = row["local_path"]
+        if not local_path:
+            raise HTTPException(400, "Local path not configured for repository")
+        root = Path(local_path).expanduser().resolve()
+        if not root.is_dir():
+            raise HTTPException(400, "Repository local directory not found")
+            
+        file_paths = []
+        for p in root.rglob("*"):
+            if p.is_file():
+                parts = p.relative_to(root).parts
+                if any(x in parts for x in (".git", ".venv", "node_modules", "dist", "build", "__pycache__")):
+                    continue
+                if p.suffix.lower() in supported_exts:
+                    file_paths.append(str(p.relative_to(root)))
+        return sorted(file_paths)
+        
+    else:  # Assume github
+        token = (row["capabilities"] or {}).get("dev_token")
+        if not token:
+            raise HTTPException(400, "GitHub connection token not found")
+            
+        import httpx
+        repo_name = row["full_name"]
+        branch = row["default_branch"] or "main"
+        
+        url = f"https://api.github.com/repos/{repo_name}/git/trees/{branch}?recursive=1"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json"
+        }
+        
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, headers=headers)
+            if resp.status_code != 200:
+                raise HTTPException(500, f"GitHub trees API failed: {resp.text}")
+            
+            tree_data = resp.json()
+            file_paths = []
+            for item in tree_data.get("tree", []):
+                if item.get("type") == "blob":
+                    path = item.get("path", "")
+                    suffix = Path(path).suffix.lower()
+                    if suffix in supported_exts:
+                        file_paths.append(path)
+            return sorted(file_paths)
+
+
+@router.get("/repos/{repo_id}/file-content")
+async def get_repo_file_content(repo_id: str, path: str) -> dict:
+    async with session_factory()() as db:
+        row = (await db.execute(text("""
+            SELECT repo.full_name, conn.forge_type, conn.capabilities,
+                   repo.config->>'local_path' AS local_path, repo.default_branch
+            FROM repositories repo
+            JOIN forge_connections conn ON conn.id = repo.connection_id
+            WHERE repo.id = :id
+        """), {"id": repo_id})).mappings().one_or_none()
+        
+    if not row:
+        raise HTTPException(404, "Repository not found")
+        
+    if row["forge_type"] == "local":
+        local_path = row["local_path"]
+        if not local_path:
+            raise HTTPException(400, "Local path not configured for repository")
+        root = Path(local_path).expanduser().resolve()
+        file_path = (root / path).resolve()
+        
+        try:
+            file_path.relative_to(root)
+        except ValueError:
+            raise HTTPException(403, "Access denied (path traversal detected)")
+            
+        if not file_path.is_file():
+            raise HTTPException(404, f"File not found: {path}")
+            
+        try:
+            content = file_path.read_text(encoding="utf-8", errors="replace")
+            return {"content": content}
+        except Exception as e:
+            raise HTTPException(500, f"Failed to read local file: {e}")
+            
+    else:  # Assume github
+        token = (row["capabilities"] or {}).get("dev_token")
+        if not token:
+            raise HTTPException(400, "GitHub connection token not found")
+            
+        import httpx
+        import base64
+        repo_name = row["full_name"]
+        branch = row["default_branch"] or "main"
+        
+        url = f"https://api.github.com/repos/{repo_name}/contents/{path}?ref={branch}"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json"
+        }
+        
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, headers=headers)
+            if resp.status_code != 200:
+                raise HTTPException(resp.status_code, f"GitHub contents API failed: {resp.text}")
+            
+            data = resp.json()
+            b64_content = data.get("content", "")
+            clean_b64 = b64_content.replace("\n", "").replace("\r", "")
+            try:
+                content = base64.b64decode(clean_b64).decode("utf-8", errors="replace")
+                return {"content": content}
+            except Exception as e:
+                raise HTTPException(500, f"Failed to decode base64 file content: {e}")

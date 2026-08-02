@@ -242,3 +242,44 @@ export function TR({ children, className }: { children: React.ReactNode; classNa
 export function TD({ children, className }: { children?: React.ReactNode; className?: string }) {
   return <td className={clsx("px-4 py-2.5 text-text-1", className)}>{children}</td>;
 }
+
+export function Markdown({ text }: { text: string }) {
+  if (!text) return null;
+  const blocks = text.split(/\n\n+/);
+  return (
+    <div className="space-y-3">
+      {blocks.map((block, idx) => {
+        const trimmed = block.trim();
+        if (!trimmed) return null;
+        if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+          const items = trimmed.split(/\n[-*]\s+/).map(item => item.replace(/^[-*]\s+/, ""));
+          return (
+            <ul key={idx} className="list-disc pl-5 space-y-1.5 text-xs text-text-2 my-2">
+              {items.map((item, i) => (
+                <li key={i}>{renderInline(item)}</li>
+              ))}
+            </ul>
+          );
+        }
+        return (
+          <p key={idx} className="text-xs text-text-2 leading-relaxed">
+            {renderInline(trimmed)}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+function renderInline(str: string) {
+  const parts = str.split(/(\*\*.*?\*\*|`.*?`)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={i} className="font-semibold text-text-1">{part.slice(2, -2)}</strong>;
+    }
+    if (part.startsWith("`") && part.endsWith("`")) {
+      return <code key={i} className="bg-panel-2 border border-border px-1.5 py-0.5 rounded text-[11px] font-mono text-emerald-400">{part.slice(1, -1)}</code>;
+    }
+    return part;
+  });
+}

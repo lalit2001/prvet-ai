@@ -41,6 +41,47 @@ class ReviewResult:
     stats: dict = field(default_factory=dict)
 
 
+def _clean_and_parse_json(text: str) -> dict:
+    text = text.strip()
+    if text.startswith("```json"):
+        text = text[7:]
+    elif text.startswith("```"):
+        text = text[3:]
+    if text.endswith("```"):
+        text = text[:-3]
+    text = text.strip()
+    
+    first_brace = text.find("{")
+    last_brace = text.rfind("}")
+    if first_brace != -1 and last_brace != -1:
+        text = text[first_brace:last_brace+1]
+    return json.loads(text)
+
+
+async def summarize_project(prompt: str, run_id: str | None = None) -> str:
+    async with session_factory()() as db:
+        row = (await db.execute(text(
+            "SELECT COALESCE(settings->'providers', '[]'::jsonb) AS ps FROM organizations WHERE slug='default'"
+        ))).mappings().one()
+    providers = list(row["ps"] or [])
+    try:
+        client = client_from_org(providers)
+    except LlmError as e:
+        return f"_summary skipped: {e}_"
+
+    messages = [
+        {"role": "system", "content": "You are a senior tech lead helping developers understand a codebase. Return a plain markdown paragraph (4-6 sentences) summarizing the codebase."},
+        {"role": "user", "content": prompt}
+    ]
+    try:
+        resp = await client.chat("deep", messages)
+        if run_id:
+            await _log_call(run_id, resp)
+        return resp.content or ""
+    except Exception as e:
+        return f"_summary failed: {e}_"
+
+
 async def review(code: str, language: str | None = None, context: str | None = None,
                  run_id: str | None = None) -> ReviewResult:
     # Load providers from org.settings; if none, the UI tells the user to add one.
@@ -73,12 +114,24 @@ async def review(code: str, language: str | None = None, context: str | None = N
         return ReviewResult(summary="", findings=[], error=str(e))
 
     try:
-        parsed = json.loads(resp.content)
+        parsed = _clean_and_parse_json(resp.content)
         summary = parsed.get("summary", "")
         findings = parsed.get("findings", []) or []
-    except json.JSONDecodeError:
-        return ReviewResult(summary="", findings=[], error="llm returned non-JSON",
-                            stats={"raw": resp.content[:2000]})
+    except (json.JSONDecodeError, ValueError) as first_err:
+        # One-time repair retry on malformed JSON
+        repair_messages = messages + [
+            {"role": "assistant", "content": resp.content},
+            {"role": "user", "content": f"Your response was not valid JSON ({first_err}). Please output ONLY the raw JSON document matching the requested schema. Do not wrap in markdown code blocks."}
+        ]
+        try:
+            resp_retry = await client.chat("deep", repair_messages, response_format={"type": "json_object"})
+            parsed = _clean_and_parse_json(resp_retry.content)
+            summary = parsed.get("summary", "")
+            findings = parsed.get("findings", []) or []
+            resp = resp_retry
+        except Exception as retry_err:
+            return ReviewResult(summary="", findings=[], error=f"llm returned non-JSON: {first_err} (retry failed: {retry_err})",
+                                stats={"raw": resp.content[:2000]})
 
     if run_id:
         await _log_call(run_id, resp)
