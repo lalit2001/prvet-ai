@@ -96,9 +96,12 @@ export const api = {
     createLocal: (name: string, local_path: string) =>
       req<Repo>("/api/v1/repos/local", { method: "POST", body: JSON.stringify({ name, local_path }) }),
     baseline: (id: string) =>
-      req<{ run_id: string; baseline_id: string; files_indexed: number; symbols: number; cached?: boolean }>(
-        `/api/v1/repos/${id}/baseline`, { method: "POST" }
-      ),
+      req<{
+        run_id: string; baseline_id: string;
+        files_seen: number; files_indexed: number; files_skipped: number;
+        symbols: number; cached?: boolean;
+        by_language: Record<string, number>;
+      }>(`/api/v1/repos/${id}/baseline`, { method: "POST" }),
     findings: (id: string) => req<Finding[]>(`/api/v1/repos/${id}/findings`),
     getConfig: (id: string) => req<RepoConfig>(`/api/v1/repos/${id}/config`),
     putConfig: (id: string, cfg: RepoConfig) =>

@@ -1,8 +1,8 @@
 """Baseline job — PRD F4.
 
-M2 slice: walk → parse Python → persist files + symbols → insert baseline row.
-Deferred to M3: git clone (currently takes a local path), snapshot archive to
-object store, metrics computation, hotspot ranking + LLM review, embeddings."""
+Multi-language via dispatch: pyast for Python, tree-sitter for JS/TS/TSX.
+Deferred: git clone (caller supplies local_path), snapshot archive, metrics,
+hotspot ranking + LLM review, embeddings."""
 from __future__ import annotations
 
 import uuid
@@ -12,9 +12,21 @@ from pathlib import Path
 from sqlalchemy import text
 
 from crv_core.db import session_factory
+from crv_worker.indexing import pyast, treesitter
 from crv_worker.indexing.persist import replace_symbols, upsert_file
-from crv_worker.indexing.pyast import content_hash, extract_symbols, module_key_for
 from crv_worker.indexing.walker import walk
+
+
+def _lang_for(path: Path) -> str | None:
+    if path.suffix == ".py":
+        return "python"
+    return treesitter.lang_for(path)
+
+
+def _extract(path: Path, mkey: str, lang: str):
+    if lang == "python":
+        return pyast.extract_symbols(path, mkey)
+    return treesitter.extract_symbols(path, mkey)
 
 
 async def run(ctx, repo_id: str, local_path: str, commit_sha: str) -> dict:
@@ -23,7 +35,8 @@ async def run(ctx, repo_id: str, local_path: str, commit_sha: str) -> dict:
         return {"status": "failed", "error": f"not a directory: {root}"}
 
     run_id = str(uuid.uuid4())
-    stats = {"files_seen": 0, "files_indexed": 0, "symbols": 0}
+    stats: dict = {"files_seen": 0, "files_indexed": 0, "files_skipped": 0,
+                   "symbols": 0, "by_language": {}}
     started = datetime.now(timezone.utc)
 
     async with session_factory()() as db:
@@ -37,7 +50,10 @@ async def run(ctx, repo_id: str, local_path: str, commit_sha: str) -> dict:
             s = existing["stats"] or {}
             return {"status": "succeeded", "cached": True,
                     "run_id": existing["run_id"], "baseline_id": existing["baseline_id"],
-                    "files_indexed": s.get("files_indexed", 0), "symbols": s.get("symbols", 0)}
+                    "files_seen": s.get("files_seen", 0),
+                    "files_indexed": s.get("files_indexed", 0),
+                    "symbols": s.get("symbols", 0),
+                    "by_language": s.get("by_language", {})}
 
         await db.execute(text("""
             INSERT INTO runs (id, repo_id, run_type, trigger, status, commit_sha,
@@ -49,18 +65,21 @@ async def run(ctx, repo_id: str, local_path: str, commit_sha: str) -> dict:
 
         for path in walk(root):
             stats["files_seen"] += 1
-            if path.suffix != ".py":
-                continue  # M3 extends to .ts/.tsx/.js/.java/.go via tree-sitter
+            lang = _lang_for(path)
+            if lang is None:
+                stats["files_skipped"] += 1
+                continue
             rel = str(path.relative_to(root))
             try:
                 text_body = path.read_text(errors="replace")
                 loc = text_body.count("\n") + 1
-                mkey = module_key_for(path, root)
-                syms = extract_symbols(path, mkey)
-                file_id = await upsert_file(db, repo_id, rel, "python", content_hash(path), loc, commit_sha)
+                mkey = pyast.module_key_for(path, root)
+                syms = _extract(path, mkey, lang)
+                file_id = await upsert_file(db, repo_id, rel, lang, pyast.content_hash(path), loc, commit_sha)
                 await replace_symbols(db, repo_id, file_id, syms)
                 stats["files_indexed"] += 1
                 stats["symbols"] += len(syms)
+                stats["by_language"][lang] = stats["by_language"].get(lang, 0) + 1
             except Exception as e:  # single file failure never fails the run — AC3.6
                 print(f"[baseline] skipped {rel}: {e}")
         await db.commit()
@@ -75,7 +94,7 @@ async def run(ctx, repo_id: str, local_path: str, commit_sha: str) -> dict:
             VALUES (:id, :rid, :run_id, :sha, :uri, :metrics, 0, true)
         """), {"id": baseline_id, "rid": repo_id, "run_id": run_id,
                "sha": commit_sha, "uri": f"baselines/{repo_id}/{commit_sha}/",
-               "metrics": _dumps({"loc_total": sum(1 for _ in walk(root)), **stats})})
+               "metrics": _dumps(stats)})
         finished = datetime.now(timezone.utc)
         await db.execute(text("""
             UPDATE runs SET status='succeeded', finished_at=:fin,
