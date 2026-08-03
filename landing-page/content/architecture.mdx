@@ -1,0 +1,41 @@
+# Platform Architecture
+
+PRVet is designed to operate securely within your firewall while providing state-of-the-art AI code analysis. The architecture is composed of several decoupled services that communicate internally.
+
+## System Components
+
+### 1. Web API (`prvet-api`)
+Built with FastAPI (Python), this service handles all inbound webhook requests from Git Forges (GitHub, GitLab, Bitbucket). It authenticates requests, queues analysis jobs, and serves the Web Dashboard for administrators.
+
+### 2. Worker Engine (`prvet-worker`)
+A celery-based distributed task queue that processes long-running AI reviews. It performs:
+- **Git Operations:** Clones and checks out the PR branch.
+- **AST Parsing:** Uses `tree-sitter` to parse the codebase into an Abstract Syntax Tree.
+- **SCIP Indexing:** Resolves symbol definitions and references to map the "blast radius" of a change.
+- **LLM Inference:** Packages context and prompts local or proxy-configured LLMs for review feedback.
+
+### 3. PostgreSQL Database
+Stores persistent data including:
+- Registered Repositories
+- API/Workspace Tokens
+- Review Job Metadata and Logs
+
+### 4. Redis Cache & Broker
+Functions as the message broker for Celery and temporary cache for active review processing.
+
+---
+
+## Data Flow Diagram
+
+1. **Trigger:** A developer pushes a commit to a Pull Request on your Forge.
+2. **Webhook:** The Forge sends a webhook payload to the `prvet-api`.
+3. **Queue:** The API validates the signature and pushes a `ReviewJob` onto the Redis broker.
+4. **Checkout:** An idle `prvet-worker` picks up the job, securely cloning the repository changes into memory or a secure tmpfs.
+5. **Analyze:** The worker scans the diff, generates the AST graph, checks against `.crv.yml` rules, and analyzes the blast radius.
+6. **Report:** The worker constructs a detailed comment payload and sends it back to the Forge API to post on the PR.
+
+## Security Profile
+
+- **Zero Egress:** No code or analytics are ever sent to PRVet servers.
+- **Stateless Execution:** Workers execute jobs in isolated containers and clean up repository artifacts immediately after completion.
+- **Token Segregation:** All external API tokens are encrypted at rest in the PostgreSQL database.

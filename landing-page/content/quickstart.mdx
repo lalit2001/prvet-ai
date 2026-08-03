@@ -1,0 +1,57 @@
+# Quickstart Guide
+
+Welcome to **PRVet**. This guide will get you up and running with AI-powered, self-hosted code reviews in less than 5 minutes.
+
+## Prerequisites
+
+Before starting, ensure you have the following installed on your machine:
+- **Docker & Docker Compose** (for running the isolated PRVet container)
+- **Git** (to interact with your repositories)
+- **A supported Git Forge** (GitHub, GitLab, or Bitbucket) with an active Personal Access Token (PAT).
+
+---
+
+## 1. Start the PRVet Server
+
+PRVet runs entirely on your local infrastructure. There is no cloud telemetry and no data egress.
+
+Run the following command to start the backend services:
+
+```bash
+docker-compose up -d
+```
+
+This spins up the API server on `http://localhost:3737` and the PostgreSQL database to store your review metadata.
+
+## 2. Generate a Workspace Token
+
+Log into the PRVet dashboard at `http://localhost:3737/login` using the default administrator credentials.
+
+Once logged in, navigate to **Settings > API Tokens** and generate a new token. You will use this token in the CLI to authenticate your repository.
+
+## 3. Register your Repository
+
+Use the CLI to link your local repository with PRVet. Run this at the root of your project:
+
+```bash
+prvet repo init
+```
+
+The CLI will prompt you for:
+1. Your PRVet Server URL (`http://localhost:3737`)
+2. Your Workspace Token
+3. The Forge URL (e.g., `github.com/my-org/my-repo`)
+
+## 4. Run your First Review
+
+With your repository linked, PRVet can automatically review branches. Make a small code change, commit it, and run the following command to perform a dry-run review:
+
+```bash
+prvet review --branch=feature-branch
+```
+
+PRVet will output a summary to your terminal detailing any discovered bugs, blast radius impacts, and custom rule violations. 
+
+### What's Next?
+* Learn how to write [Custom Rules](/docs/configuration) to enforce team standards.
+* Install the [CLI Binary](/docs/install) globally.

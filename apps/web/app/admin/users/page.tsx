@@ -196,7 +196,7 @@ export default function UsersAdminPage() {
                           <Button size="sm" variant="secondary" onClick={() => handleEditClick(u)}>
                             <Pencil className="h-3.5 w-3.5" />
                           </Button>
-                          <Button size="sm" variant="danger" onClick={() => handleDelete(u)} disabled={u.email === "admin@sentry.review"}>
+                          <Button size="sm" variant="danger" onClick={() => handleDelete(u)} disabled={u.email === "admin@prvet.review"}>
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
                         </div>
@@ -226,7 +226,7 @@ export default function UsersAdminPage() {
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 className="w-full px-3 py-2 text-xs bg-panel-2 border border-border rounded focus:outline-none focus:border-emerald-600 font-mono disabled:opacity-50"
-                placeholder="developer@sentry.review"
+                placeholder="developer@prvet.review"
                 required
                 disabled={!!editingUser}
               />
@@ -277,7 +277,7 @@ export default function UsersAdminPage() {
                 type="checkbox"
                 checked={isActive}
                 onChange={e => setIsActive(e.target.checked)}
-                disabled={editingUser?.email === "admin@sentry.review"}
+                disabled={editingUser?.email === "admin@prvet.review"}
               />
               <span className="text-xs text-text-2 font-semibold">Active Account</span>
             </label>

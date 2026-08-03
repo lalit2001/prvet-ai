@@ -54,7 +54,7 @@ export default function ReposPage() {
     <>
       <PageHeader
         title="Repositories"
-        subtitle="Projects Sentry Review watches. Add a local path or a remote (soon)."
+        subtitle="Projects PRVet watches. Add a local path or a remote (soon)."
         actions={<Button onClick={() => setAddOpen(true)}><Plus className="h-4 w-4" /> Add repo</Button>}
       />
 

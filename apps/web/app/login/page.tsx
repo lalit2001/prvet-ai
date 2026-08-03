@@ -40,7 +40,7 @@ export default function LoginPage() {
           <div className="inline-flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-950/40 border border-emerald-500/20 text-emerald-400">
             <Sparkles className="h-6 w-6 animate-pulse" />
           </div>
-          <h2 className="text-2xl font-bold tracking-tight text-text-1">Sign in to Sentry Review</h2>
+          <h2 className="text-2xl font-bold tracking-tight text-text-1">Sign in to PRVet</h2>
           <p className="text-sm text-text-3">
             Use your seeded credentials to access the code review dashboard
           </p>
@@ -66,7 +66,7 @@ export default function LoginPage() {
                     value={email}
                     onChange={e => setEmail(e.target.value)}
                     className="w-full pl-10 pr-3 py-2 text-sm bg-panel-2 border border-border rounded-lg text-text-1 focus:outline-none focus:border-emerald-600"
-                    placeholder="admin@sentry.review"
+                    placeholder="admin@prvet.review"
                     required
                   />
                 </div>

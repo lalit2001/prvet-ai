@@ -1,4 +1,4 @@
-# Sentry Review — `crv`
+# PRVet — `prvet`
 
 Self-hosted AI code review that ships with your codebase, keeping your intellectual property securely within your virtual boundary.
 
@@ -32,41 +32,41 @@ Two default user accounts are automatically seeded into the database at startup 
 
 | Account Type | Email Address | Default Password | Role | UI View Permissions |
 |---|---|---|---|---|
-| **System Admin** | `admin@sentry.review` | `admin123` | `admin` | Full Access (Dashboards, Rules Config, Forge Settings, AST Viewer) |
-| **Standard User** | `user@sentry.review` | `user123` | `member` | Restricted Access (Read-only dashboards, PR findings; Configuration menus hidden) |
+| **System Admin** | `admin@prvet.review` | `admin123` | `admin` | Full Access (Dashboards, Rules Config, Forge Settings, AST Viewer) |
+| **Standard User** | `user@prvet.review` | `user123` | `member` | Restricted Access (Read-only dashboards, PR findings; Configuration menus hidden) |
 
 ---
 
-## 3. Go CLI (`crv`) Guide
+## 3. Go CLI (`prvet`) Guide
 
-The `crv` command-line utility acts as a deployment companion and CI pipeline gatekeeper. It does not require Go on the local machine once compiled.
+The `prvet` command-line utility acts as a deployment companion and CI pipeline gatekeeper. It does not require Go on the local machine once compiled.
 
 ### A. Compile the Binary
-To compile the `crv` CLI binary from source:
+To compile the `prvet` CLI binary from source:
 ```bash
-go build -o crv cli/main.go
+go build -o prvet cli/main.go
 ```
 
 ### B. Global System Installation
 Move the compiled binary to a folder in your environment's `$PATH`:
 ```bash
-sudo mv crv /usr/local/bin/crv
-sudo chmod +x /usr/local/bin/crv
+sudo mv prvet /usr/local/bin/prvet
+sudo chmod +x /usr/local/bin/prvet
 ```
 
 ### C. Available CLI Commands
 * **System Diagnostics:** Probe the status of your database, redis queue, object store, and api connection:
   ```bash
-  crv doctor
+  prvet doctor
   ```
 * **CI Gating Checks:** Validate if a pull request violates threshold rules and has unresolved critical/high issues. Exits `0` on pass, or `1` on failure:
   ```bash
-  crv gate check --pr 12 --repo owner/name
+  prvet gate check --pr 12 --repo owner/name
   ```
 * **System Deployment:** Bring up or tear down your environment stack on compose, AWS, Azure, or Kubernetes:
   ```bash
-  crv deploy --target compose
-  crv destroy --target compose
+  prvet deploy --target compose
+  prvet destroy --target compose
   ```
 
 ---

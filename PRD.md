@@ -1,9 +1,9 @@
 # Product Requirements Document
-# Sentry Review — Self-Hosted AI Code Review Platform
+# PRVet — Self-Hosted AI Code Review Platform
 
 **Doc version:** 1.0
 **Status:** Approved for implementation
-**Codename / CLI binary:** `crv`
+**Codename / CLI binary:** `prvet`
 **Target audience of this document:** implementing engineers and coding agents. Everything here is meant to be executable without further clarification. Where a decision is genuinely open, it is listed in §20 — do not silently invent an answer to those.
 
 ---

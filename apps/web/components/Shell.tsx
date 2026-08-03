@@ -38,20 +38,23 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const [authed, setAuthed] = useState(false);
 
   const isLoginPage = pathname ? pathname.replace(/\/$/, "") === "/login" : false;
+  const isLandingPage = pathname ? pathname === "/" : false;
+  const isDocsPage = pathname ? pathname.startsWith("/help") || pathname.startsWith("/docs") : false;
+  const isPublicPage = isLoginPage || isLandingPage || isDocsPage;
 
   useEffect(() => {
     if (typeof window !== "undefined") {
       const token = localStorage.getItem("crv_token");
-      if (!token && !isLoginPage) {
+      if (!token && !isPublicPage) {
         window.location.href = "/login";
       } else {
         setAuthed(true);
       }
     }
-  }, [pathname, isLoginPage]);
+  }, [pathname, isPublicPage]);
 
-  if (isLoginPage) {
-    return <div className="min-h-screen bg-bg">{children}</div>;
+  if (isPublicPage) {
+    return <div className="min-h-screen bg-bg overflow-x-hidden">{children}</div>;
   }
 
   if (!authed) {
@@ -101,12 +104,12 @@ function Sidebar() {
   return (
     <aside className="fixed left-0 top-0 z-30 flex h-screen w-60 flex-col border-r border-border bg-panel/60 backdrop-blur">
       <div className="flex items-center gap-2 px-5 py-4">
-        <div className="flex h-8 w-8 items-center justify-center rounded-md bg-emerald-600/20 ring-1 ring-emerald-600/40">
-          <span className="text-sm font-bold text-emerald-400">c</span>
+        <div className="flex h-8 w-8 items-center justify-center rounded-md bg-emerald-600/10 ring-1 ring-emerald-600/20">
+          <img src="/logo.svg" className="h-5 w-5" alt="PRVet Logo" />
         </div>
         <div>
-          <div className="text-sm font-semibold tracking-tight">Sentry Review</div>
-          <div className="text-[10px] uppercase tracking-wider text-text-3">crv · dev</div>
+          <div className="text-sm font-semibold tracking-tight">PRVet</div>
+          <div className="text-[10px] uppercase tracking-wider text-text-3">prvet · dev</div>
         </div>
       </div>
       

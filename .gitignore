@@ -56,3 +56,4 @@ Thumbs.db
 # Helm
 deploy/helm/**/charts/
 deploy/helm/**/Chart.lock
+/.agents

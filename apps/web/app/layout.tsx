@@ -5,8 +5,18 @@ import { ToastProvider } from "@/components/ui";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Sentry Review · crv",
-  description: "Self-hosted AI code review.",
+  title: "PRVet",
+  description: "Self-hosted AI code review that dynamically analyzes pull requests for security, logic defects, and blast radius context.",
+  icons: {
+    icon: "/logo.svg",
+    shortcut: "/logo.svg",
+    apple: "/logo.svg",
+  },
+  openGraph: {
+    title: "PRVet",
+    description: "Self-hosted AI code review that keeps your source code securely inside your network.",
+    images: ["/logo.svg"],
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

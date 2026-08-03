@@ -1,0 +1,54 @@
+# Rules Configuration
+
+PRVet allows you to enforce organizational standards directly inside the AI Review Engine using Custom YAML Rules. By placing a `.crv.yml` file at the root of your repository, you tell PRVet exactly what patterns to flag during pull request reviews.
+
+## The `.crv.yml` Schema
+
+The configuration file must be located at the root of the repository and named `.crv.yml`. It defines a list of custom rules. Each rule is evaluated against the Abstract Syntax Tree (AST) of the files changed in the pull request.
+
+### Basic Structure
+
+```yaml
+rules:
+  - id: no-console-log
+    pattern: "console.log(...)"
+    message: "Avoid leaving console.log statements in production code."
+    severity: warning
+```
+
+### Rule Fields
+
+* **`id`** *(Required, String)*: A unique identifier for the rule (kebab-case recommended).
+* **`pattern`** *(Required, String)*: The Semgrep-style pattern to search for in the codebase. PRVet uses intelligent AST pattern matching.
+* **`message`** *(Required, String)*: The human-readable string that PRVet will inject into the GitHub PR comment when this rule is violated.
+* **`severity`** *(Required, Enum)*: Must be one of `info`, `warning`, or `error`. If a rule with `error` severity is violated, PRVet will fail the PR Gate check, blocking the merge.
+
+---
+
+## Example Scenarios
+
+### 1. Blocking Hardcoded Secrets
+Ensure developers don't inadvertently check in API tokens.
+
+```yaml
+rules:
+  - id: block-hardcoded-aws-keys
+    pattern: "$KEY = \"AKIA...\""
+    message: "Hardcoded AWS Access Keys detected. Use environment variables instead."
+    severity: error
+```
+
+### 2. Deprecating Legacy Functions
+Help migrate away from old internal libraries.
+
+```yaml
+rules:
+  - id: deprecate-legacy-auth
+    pattern: "legacyAuth.login(...)"
+    message: "legacyAuth is deprecated. Please migrate to the new OAuthv2 provider."
+    severity: warning
+```
+
+## How the AI applies these rules
+
+When PRVet analyzes a Pull Request, it doesn't just run a naive regex. It understands the context of the code. If a developer uses a custom alias for a function, PRVet will trace the AST to understand the origin and still apply the rule if the semantic meaning matches your YAML configuration.

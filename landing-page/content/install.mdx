@@ -1,0 +1,51 @@
+# Command-Line Review Tool
+
+The PRVet CLI (`prvet`) is your primary interface for interacting with the PRVet review engine directly from your terminal or CI/CD pipelines.
+
+## Global Installation
+
+Because the CLI is built in Go, it compiles into a single, dependency-free binary. You can download the pre-compiled binary for your system architecture, or build it directly from source.
+
+### Building from Source
+
+Ensure you have Go 1.22+ installed on your system. Run the following command from the root of the repository:
+
+```bash
+make build-cli
+```
+
+This will output an executable binary at `./bin/prvet`. You should move this to a directory in your system `$PATH` for global accessibility.
+
+```bash
+sudo mv ./bin/prvet /usr/local/bin/prvet
+```
+
+## Usage Authentication
+
+The CLI needs to authenticate with your PRVet backend server. To configure this, you will need a Workspace Token generated from the Web Dashboard.
+
+Export the variables to your shell environment:
+
+```bash
+export PRVET_SERVER="http://localhost:3737"
+export PRVET_TOKEN="wt_abc123def456..."
+```
+
+## Core Commands
+
+### `prvet repo init`
+Initializes a repository configuration inside the current directory (creates a `.prvet` folder).
+
+### `prvet review`
+Manually triggers a review of the current branch against the default branch (usually `main`).
+
+```bash
+prvet review --branch=feature-update-login
+```
+
+### `prvet gate`
+Used heavily in CI/CD environments. It scans the current changeset and exits with a non-zero status code (`exit 1`) if the AI detects a high-severity logic bug, a security flaw, or a blocking Custom Rule violation.
+
+```bash
+prvet gate --target=main
+```

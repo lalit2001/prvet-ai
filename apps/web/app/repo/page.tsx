@@ -682,7 +682,7 @@ function RepoInner() {
       {/* Tab Contents: Ad-hoc Sandbox */}
       {tab === "review" && (
         <Card>
-          <CardHeader title="Ad-hoc LLM Sandbox" subtitle="Test code snippets instantly to see what findings Sentry review catches" />
+          <CardHeader title="Ad-hoc LLM Sandbox" subtitle="Test code snippets instantly to see what findings PRVet catches" />
           <CardBody className="space-y-4">
             <div className="flex items-center gap-2">
               <span className="text-xs text-text-3 font-semibold">Source Language:</span>

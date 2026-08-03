@@ -1,5 +1,5 @@
 # Delivery, Deployment & Cost Plan
-# Sentry Review (`crv`) — Companion to PRD.md
+# PRVet (`prvet`) — Companion to PRD.md
 
 **Doc version:** 1.0
 **Reads with:** `PRD.md` (v1.0). This plan does not re-state the PRD; it fills the sections the PRD references but leaves open (§11, §12, §13, §14, §20), and adds a phased delivery plan, per-target deployment guides, per-SKU cost tables, and the single-command CLI flow.
@@ -7,7 +7,7 @@
 
 > **Ponytail rule active for this project.** Every section here is the shortest thing that answers the question. Speculative flexibility gets called out and skipped. If a decision is a real judgment call it is listed in [§20 Open Decisions](#20-open-decisions) — do not silently invent one.
 
-> **Surface split (non-negotiable):** the **CLI (`crv`) is a deployment helper only** — install, upgrade, health check, CI gate probe. **Everything else runs in the Web UI**: connecting forges, adding repos, configuring LLMs, editing rules, setting thresholds, viewing reports and findings, managing users. If a knob exists at runtime, it lives in the UI, not the CLI. See [§C5](#c5-the-crv-single-command-flow).
+> **Surface split (non-negotiable):** the **CLI (`prvet`) is a deployment helper only** — install, upgrade, health check, CI gate probe. **Everything else runs in the Web UI**: connecting forges, adding repos, configuring LLMs, editing rules, setting thresholds, viewing reports and findings, managing users. If a knob exists at runtime, it lives in the UI, not the CLI. See [§C5](#c5-the-prv-single-command-flow).ommand-flow).
 
 ---
 

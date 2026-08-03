@@ -309,7 +309,7 @@ export default function ForgesPage() {
                 <Check className="h-4 w-4 shrink-0 mt-0.5" />
                 <div>
                   <h4 className="font-bold mb-1">Repository Enabled in Database!</h4>
-                  <p>Repository "{selected}" has been created in the Sentry Review repository log.</p>
+                  <p>Repository "{selected}" has been created in the PRVet repository log.</p>
                 </div>
               </div>
 

@@ -84,27 +84,27 @@ async def ensure_default_org() -> str:
             return f"pbkdf2_sha256$100000${salt.hex()}${pw_hash.hex()}"
 
         admin_existing = (await db.execute(
-            text("SELECT id FROM users WHERE email = 'admin@sentry.review'")
+            text("SELECT id FROM users WHERE email = 'admin@prvet.review'")
         )).scalar_one_or_none()
         
         if not admin_existing:
             await db.execute(
                 text("""
                     INSERT INTO users (id, org_id, email, display_name, role, password_hash)
-                    VALUES (:id, :org, 'admin@sentry.review', 'System Admin', 'admin', :pw)
+                    VALUES (:id, :org, 'admin@prvet.review', 'System Admin', 'admin', :pw)
                 """),
                 {"id": str(uuid.uuid4()), "org": oid, "pw": _hash_pw(admin_pw)}
             )
             
         user_existing = (await db.execute(
-            text("SELECT id FROM users WHERE email = 'user@sentry.review'")
+            text("SELECT id FROM users WHERE email = 'user@prvet.review'")
         )).scalar_one_or_none()
         
         if not user_existing:
             await db.execute(
                 text("""
                     INSERT INTO users (id, org_id, email, display_name, role, password_hash)
-                    VALUES (:id, :org, 'user@sentry.review', 'Standard User', 'member', :pw)
+                    VALUES (:id, :org, 'user@prvet.review', 'Standard User', 'member', :pw)
                 """),
                 {"id": str(uuid.uuid4()), "org": oid, "pw": _hash_pw(user_pw)}
             )
