@@ -38,9 +38,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const [authed, setAuthed] = useState(false);
 
   const isLoginPage = pathname ? pathname.replace(/\/$/, "") === "/login" : false;
-  const isLandingPage = pathname ? pathname === "/" : false;
   const isDocsPage = pathname ? pathname.startsWith("/help") || pathname.startsWith("/docs") : false;
-  const isPublicPage = isLoginPage || isLandingPage || isDocsPage;
+  const isPublicPage = isLoginPage || isDocsPage;
 
   useEffect(() => {
     if (typeof window !== "undefined") {

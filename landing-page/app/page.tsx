@@ -4,9 +4,9 @@ import React from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { 
-  GitPullRequest, BrainCircuit, Code, ShieldAlert,
-  Server, Lock, FileCode, Search, Terminal, ArrowRight,
-  CheckCircle2, Network, Cpu, Database
+  GitPullRequest, BrainCircuit, ShieldAlert,
+  Server, Lock, FileCode, Terminal, ArrowRight,
+  Network, Cpu, Database
 } from "lucide-react";
 
 const fadeIn = {
@@ -78,7 +78,7 @@ export default function Home() {
               </h1>
               
               <p className="text-brand-light/70 text-lg leading-relaxed font-light max-w-lg">
-                PRVet doesn't just read diffs. It parses your Abstract Syntax Tree, indexes your entire repository, and flags blast-radius logic bugs—all while remaining 100% airgapped inside your VPC.
+                PRVet doesn&apos;t just read diffs. It parses your Abstract Syntax Tree, indexes your entire repository, and flags blast-radius logic bugs—all while remaining 100% airgapped inside your VPC.
               </p>
               
               <div className="flex flex-col sm:flex-row gap-4 pt-4">
@@ -216,13 +216,13 @@ export default function Home() {
               <pre className="font-mono text-xs text-zinc-300 leading-relaxed overflow-x-auto">
 <span className="text-brand-primary">rules:</span>
   - <span className="text-indigo-400">id:</span> <span className="text-emerald-300">block-unsafe-eval</span>
-    <span className="text-indigo-400">pattern:</span> <span className="text-emerald-300">"eval(...)"</span>
-    <span className="text-indigo-400">message:</span> <span className="text-emerald-300">"Never use eval in production."</span>
+    <span className="text-indigo-400">pattern:</span> <span className="text-emerald-300">&quot;eval(...)&quot;</span>
+    <span className="text-indigo-400">message:</span> <span className="text-emerald-300">&quot;Never use eval in production.&quot;</span>
     <span className="text-indigo-400">severity:</span> <span className="text-emerald-300">error</span>
 
   - <span className="text-indigo-400">id:</span> <span className="text-emerald-300">require-logger</span>
-    <span className="text-indigo-400">pattern:</span> <span className="text-emerald-300">"console.log(...)"</span>
-    <span className="text-indigo-400">message:</span> <span className="text-emerald-300">"Use the internal winston logger."</span>
+    <span className="text-indigo-400">pattern:</span> <span className="text-emerald-300">&quot;console.log(...)&quot;</span>
+    <span className="text-indigo-400">message:</span> <span className="text-emerald-300">&quot;Use the internal winston logger.&quot;</span>
     <span className="text-indigo-400">severity:</span> <span className="text-emerald-300">warning</span>
               </pre>
             </div>
