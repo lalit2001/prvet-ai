@@ -1,7 +1,18 @@
-"""All environment configuration. One flat model — see plan.md §14."""
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from typing import Literal
+from dotenv import load_dotenv
+
+# Search up to 5 parent directories to locate and load the root .env file
+_cur = Path(__file__).resolve().parent
+for _ in range(6):
+    _env = _cur / ".env"
+    if _env.is_file():
+        load_dotenv(dotenv_path=_env)
+        break
+    _cur = _cur.parent
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict

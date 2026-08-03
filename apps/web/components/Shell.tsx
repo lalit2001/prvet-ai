@@ -3,7 +3,7 @@
 import clsx from "clsx";
 import {
   Activity, AlertOctagon, Bot, Cable, FileCheck, FolderGit2, GitPullRequest, HelpCircle,
-  LayoutDashboard, Play, Settings, Code2,
+  LayoutDashboard, Play, Settings, Code2, Loader2, LogOut, User, Users
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -20,6 +20,7 @@ const NAV = [
     { href: "/runs", label: "Runs", icon: Play },
   ]},
   { section: "Configure", items: [
+    { href: "/admin/users", label: "Users & Access", icon: Users },
     { href: "/admin/forges", label: "GitHub / Forges", icon: Cable },
     { href: "/admin/providers", label: "AI Providers", icon: Bot },
     { href: "/admin/rules", label: "Rules", icon: FileCheck },
@@ -28,11 +29,39 @@ const NAV = [
     { href: "/admin", label: "Settings", icon: Settings },
   ]},
   { section: "Learn", items: [
-    { href: "/help", label: "Setup guide", icon: HelpCircle },
+    { href: "/help", label: "Documentation", icon: HelpCircle },
   ]},
 ] as const;
 
 export function Shell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const [authed, setAuthed] = useState(false);
+
+  const isLoginPage = pathname ? pathname.replace(/\/$/, "") === "/login" : false;
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const token = localStorage.getItem("crv_token");
+      if (!token && !isLoginPage) {
+        window.location.href = "/login";
+      } else {
+        setAuthed(true);
+      }
+    }
+  }, [pathname, isLoginPage]);
+
+  if (isLoginPage) {
+    return <div className="min-h-screen bg-bg">{children}</div>;
+  }
+
+  if (!authed) {
+    return (
+      <div className="min-h-screen bg-bg flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-emerald-500" />
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-bg">
       <Sidebar />
@@ -46,6 +75,29 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
 function Sidebar() {
   const path = usePathname() || "/";
+  const [userRole, setUserRole] = useState("member");
+  const [userName, setUserName] = useState("Standard User");
+  const [userEmail, setUserEmail] = useState("");
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setUserRole(localStorage.getItem("crv_role") || "member");
+      setUserName(localStorage.getItem("crv_name") || "Standard User");
+      setUserEmail(localStorage.getItem("crv_email") || "");
+    }
+  }, []);
+
+  function handleLogout() {
+    localStorage.removeItem("crv_token");
+    localStorage.removeItem("crv_role");
+    localStorage.removeItem("crv_email");
+    localStorage.removeItem("crv_name");
+    window.location.href = "/login";
+  }
+
+  // Hide Configure section for standard users
+  const filteredNav = NAV.filter(s => s.section !== "Configure" || userRole === "admin");
+
   return (
     <aside className="fixed left-0 top-0 z-30 flex h-screen w-60 flex-col border-r border-border bg-panel/60 backdrop-blur">
       <div className="flex items-center gap-2 px-5 py-4">
@@ -57,8 +109,9 @@ function Sidebar() {
           <div className="text-[10px] uppercase tracking-wider text-text-3">crv · dev</div>
         </div>
       </div>
+      
       <nav className="flex-1 overflow-y-auto px-3 py-2">
-        {NAV.map((s) => (
+        {filteredNav.map((s) => (
           <div key={s.section} className="mb-4">
             <div className="mb-1.5 px-2 text-[10px] font-medium uppercase tracking-wider text-text-3">{s.section}</div>
             <ul className="space-y-0.5">
@@ -86,8 +139,25 @@ function Sidebar() {
           </div>
         ))}
       </nav>
-      <div className="border-t border-border px-5 py-3 text-[10px] text-text-3">
-        <div>v0.1.0 · default org</div>
+
+      {/* User profile footer */}
+      <div className="border-t border-border p-4 bg-panel/30">
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-neutral-900 border border-neutral-800 text-neutral-400">
+            <User className="h-4 w-4" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-xs font-semibold text-text-1 truncate">{userName}</div>
+            <div className="text-[10px] text-text-3 capitalize truncate">{userRole === "admin" ? "Administrator" : "Member"}</div>
+          </div>
+          <button
+            onClick={handleLogout}
+            title="Log Out"
+            className="p-1.5 text-text-3 hover:text-red-400 hover:bg-panel-2 rounded-lg transition-colors focus:outline-none"
+          >
+            <LogOut className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
     </aside>
   );

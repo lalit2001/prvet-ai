@@ -13,8 +13,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
 from crv_api.middleware.request_id import RequestIdMiddleware
-from crv_api.routers import admin, config, findings, forges, health, providers, repos, reviews, webhooks
-from crv_api.startup import clean_stale_runs, ensure_default_org
+from crv_api.routers import admin, config, findings, forges, health, providers, repos, reviews, webhooks, auth
+from crv_api.startup import clean_stale_runs, ensure_default_org, run_db_migrations
 from crv_core.settings import get_settings
 from crv_core.queue import pool as queue_pool
 
@@ -80,6 +80,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 @contextlib.asynccontextmanager
 async def _lifespan(app: FastAPI):
     patch_httpx_airgap()
+    run_db_migrations()
     await ensure_default_org()
     n = await clean_stale_runs()
     if n:
@@ -111,6 +112,7 @@ def create_app() -> FastAPI:
     app.include_router(providers.router, prefix="/api/v1")
     app.include_router(forges.router, prefix="/api/v1")
     app.include_router(findings.router, prefix="/api/v1")
+    app.include_router(auth.router, prefix="/api/v1")
     return app
 
 

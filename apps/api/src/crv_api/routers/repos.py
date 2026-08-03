@@ -7,12 +7,13 @@ import subprocess
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy import text
 
 from crv_core.db import session_factory
 from crv_core.settings import get_settings
+from crv_api.routers.auth import get_current_user, verify_repo_access
 
 router = APIRouter()
 
@@ -49,12 +50,21 @@ class RunOut(BaseModel):
 
 
 @router.get("/repos", response_model=list[RepoOut])
-async def list_repos() -> list[RepoOut]:
+async def list_repos(user: dict = Depends(get_current_user)) -> list[RepoOut]:
     async with session_factory()() as db:
-        rows = (await db.execute(text("""
-            SELECT id::text, full_name, clone_url, default_branch, is_enabled
-            FROM repositories ORDER BY created_at DESC
-        """))).mappings().all()
+        if user["role"] == "admin":
+            rows = (await db.execute(text("""
+                SELECT id::text, full_name, clone_url, default_branch, is_enabled
+                FROM repositories ORDER BY created_at DESC
+            """))).mappings().all()
+        else:
+            rows = (await db.execute(text("""
+                SELECT r.id::text, r.full_name, r.clone_url, r.default_branch, r.is_enabled
+                FROM repositories r
+                JOIN user_repository_permissions p ON p.repository_id = r.id
+                WHERE p.user_id = :uid
+                ORDER BY r.created_at DESC
+            """), {"uid": user["id"]})).mappings().all()
     return [RepoOut(**r) for r in rows]
 
 

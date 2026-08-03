@@ -1,14 +1,15 @@
 """Admin utility endpoints — LLM connectivity test, recent runs, audit log."""
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy import text
 
 from crv_adapters.llm import LlmError, client_from_org
 from crv_core.db import session_factory
+from crv_api.routers.auth import get_admin_user
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_admin_user)])
 
 
 class LlmTestOut(BaseModel):
@@ -195,5 +196,188 @@ async def parse_ast(body: ParseAstIn) -> dict:
             
     else:
         return {"status": "error", "error": f"AST parsing not supported for language: {lang}"}
+
+
+class UserCreateIn(BaseModel):
+    email: str
+    display_name: str | None = None
+    role: str = "member"
+    is_active: bool = True
+    password: str
+    permitted_repos: list[str] = []
+
+class UserUpdateIn(BaseModel):
+    display_name: str | None = None
+    role: str = "member"
+    is_active: bool = True
+    password: str | None = None
+    permitted_repos: list[str] = []
+
+class UserOut(BaseModel):
+    id: str
+    email: str
+    display_name: str | None
+    role: str
+    is_active: bool
+    permitted_repos: list[str]
+
+@router.get("/admin/users", response_model=list[UserOut])
+async def list_users() -> list[UserOut]:
+    async with session_factory()() as db:
+        users = (await db.execute(text("""
+            SELECT id::text, email, display_name, role, is_active
+            FROM users ORDER BY created_at DESC
+        """))).mappings().all()
+        
+        out = []
+        for u in users:
+            repo_ids = (await db.execute(text("""
+                SELECT repository_id::text FROM user_repository_permissions
+                WHERE user_id = :uid
+            """), {"uid": u["id"]})).scalars().all()
+            
+            out.append(UserOut(
+                id=u["id"],
+                email=u["email"],
+                display_name=u["display_name"],
+                role=u["role"],
+                is_active=u["is_active"],
+                permitted_repos=list(repo_ids)
+            ))
+        return out
+
+@router.post("/admin/users", response_model=UserOut, status_code=201)
+async def create_user(body: UserCreateIn) -> UserOut:
+    import hashlib
+    import uuid
+
+    def _hash_pw(password: str) -> str:
+        salt = bytes.fromhex("1234567890abcdef1234567890abcdef")
+        pw_hash = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 100000)
+        return f"pbkdf2_sha256$100000${salt.hex()}${pw_hash.hex()}"
+
+    async with session_factory()() as db:
+        existing = (await db.execute(text("""
+            SELECT id FROM users WHERE LOWER(email) = LOWER(:e)
+        """), {"e": body.email})).scalar_one_or_none()
+        if existing:
+            raise HTTPException(400, "User with this email already exists")
+
+        org_id = (await db.execute(text("SELECT id FROM organizations WHERE slug = 'default'"))).scalar_one_or_none()
+        if not org_id:
+            raise HTTPException(500, "Default organization not found")
+
+        uid = str(uuid.uuid4())
+        await db.execute(
+            text("""
+                INSERT INTO users (id, org_id, email, display_name, role, is_active, password_hash)
+                VALUES (:id, :org, :email, :name, :role, :active, :pw)
+            """),
+            {
+                "id": uid,
+                "org": str(org_id),
+                "email": body.email,
+                "name": body.display_name,
+                "role": body.role,
+                "active": body.is_active,
+                "pw": _hash_pw(body.password)
+            }
+        )
+
+        for rid in body.permitted_repos:
+            await db.execute(text("""
+                INSERT INTO user_repository_permissions (user_id, repository_id)
+                VALUES (:uid, :rid)
+                ON CONFLICT DO NOTHING
+            """), {"uid": uid, "rid": rid})
+
+        await db.commit()
+
+        return UserOut(
+            id=uid,
+            email=body.email,
+            display_name=body.display_name,
+            role=body.role,
+            is_active=body.is_active,
+            permitted_repos=body.permitted_repos
+        )
+
+@router.put("/admin/users/{user_id}", response_model=UserOut)
+async def update_user(user_id: str, body: UserUpdateIn) -> UserOut:
+    import hashlib
+    def _hash_pw(password: str) -> str:
+        salt = bytes.fromhex("1234567890abcdef1234567890abcdef")
+        pw_hash = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 100000)
+        return f"pbkdf2_sha256$100000${salt.hex()}${pw_hash.hex()}"
+
+    async with session_factory()() as db:
+        user = (await db.execute(text("""
+            SELECT id::text, email FROM users WHERE id = :id
+        """), {"id": user_id})).mappings().one_or_none()
+        
+        if not user:
+            raise HTTPException(404, "User not found")
+
+        if body.password:
+            await db.execute(
+                text("""
+                    UPDATE users
+                    SET display_name = :name, role = :role, is_active = :active, password_hash = :pw
+                    WHERE id = :id
+                """),
+                {
+                    "id": user_id,
+                    "name": body.display_name,
+                    "role": body.role,
+                    "active": body.is_active,
+                    "pw": _hash_pw(body.password)
+                }
+            )
+        else:
+            await db.execute(
+                text("""
+                    UPDATE users
+                    SET display_name = :name, role = :role, is_active = :active
+                    WHERE id = :id
+                """),
+                {
+                    "id": user_id,
+                    "name": body.display_name,
+                    "role": body.role,
+                    "active": body.is_active
+                }
+            )
+
+        await db.execute(text("""
+            DELETE FROM user_repository_permissions WHERE user_id = :uid
+        """), {"uid": user_id})
+
+        for rid in body.permitted_repos:
+            await db.execute(text("""
+                INSERT INTO user_repository_permissions (user_id, repository_id)
+                VALUES (:uid, :rid)
+                ON CONFLICT DO NOTHING
+            """), {"uid": user_id, "rid": rid})
+
+        await db.commit()
+
+        return UserOut(
+            id=user_id,
+            email=user["email"],
+            display_name=body.display_name,
+            role=body.role,
+            is_active=body.is_active,
+            permitted_repos=body.permitted_repos
+        )
+
+@router.delete("/admin/users/{user_id}", status_code=204)
+async def delete_user(user_id: str) -> None:
+    async with session_factory()() as db:
+        user_exists = (await db.execute(text("SELECT 1 FROM users WHERE id = :id"), {"id": user_id})).scalar_one_or_none()
+        if not user_exists:
+            raise HTTPException(404, "User not found")
+            
+        await db.execute(text("DELETE FROM users WHERE id = :id"), {"id": user_id})
+        await db.commit()
 
 

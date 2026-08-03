@@ -1,11 +1,29 @@
 import { apiBaseUrl } from "@/lib/config";
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (typeof window !== "undefined") {
+    const token = localStorage.getItem("crv_token");
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+  }
+  
   const r = await fetch(`${apiBaseUrl()}${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    headers: { ...headers, ...(init?.headers ?? {}) },
   });
+  
   const body = await r.text();
+  
+  if (r.status === 401 && typeof window !== "undefined") {
+    localStorage.removeItem("crv_token");
+    localStorage.removeItem("crv_role");
+    if (window.location.pathname !== "/login") {
+      window.location.href = "/login";
+    }
+  }
+  
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}: ${body.slice(0, 500)}`);
   return body ? (JSON.parse(body) as T) : ({} as T);
 }
@@ -176,6 +194,12 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ code, language }),
       }),
+    users: {
+      list: () => req<Array<{ id: string; email: string; display_name: string | null; role: string; is_active: boolean; permitted_repos: string[] }>>("/api/v1/admin/users"),
+      create: (body: any) => req<any>("/api/v1/admin/users", { method: "POST", body: JSON.stringify(body) }),
+      update: (id: string, body: any) => req<any>(`/api/v1/admin/users/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+      delete: (id: string) => req<void>(`/api/v1/admin/users/${id}`, { method: "DELETE" }),
+    },
   },
 
   findings: {
@@ -201,5 +225,13 @@ export const api = {
       files_tree: Record<string, Finding[]>;
       open_findings_count: number;
     }>>("/api/v1/prs"),
+  },
+
+  auth: {
+    login: (body: any) => req<{ token: string; role: string; email: string; display_name?: string }>("/api/v1/auth/login", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+    me: () => req<{ id: string; email: string; role: string; display_name: string }>("/api/v1/auth/me"),
   },
 };

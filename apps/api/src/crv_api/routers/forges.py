@@ -35,9 +35,21 @@ class GitHubConnectOut(BaseModel):
     github_user: str
 
 
+class GitLabConnectIn(BaseModel):
+    token: str
+    base_url: str | None = None
+    name: str | None = None
+
+
+class AzureConnectIn(BaseModel):
+    token: str
+    base_url: str
+    name: str | None = None
+
+
 class RepoIn(BaseModel):
     full_name: str
-    webhook_url: str   # user-provided public URL where GitHub will POST
+    webhook_url: str
 
 
 class RepoEnableOut(BaseModel):
@@ -58,6 +70,27 @@ async def _gh(headers_token: str, path: str, method: str = "GET",
     return r.status_code, (r.json() if r.content else {})
 
 
+async def _gl(token: str, base_url: str, path: str, method: str = "GET",
+              json_body: dict | None = None) -> tuple[int, dict | list]:
+    async with httpx.AsyncClient(timeout=15) as h:
+        r = await h.request(method, f"{base_url}{path}",
+            headers={"Authorization": f"Bearer {token}"},
+            json=json_body)
+    return r.status_code, (r.json() if r.content else {})
+
+
+async def _az(token: str, base_url: str, path: str, method: str = "GET",
+              json_body: dict | None = None) -> tuple[int, dict | list]:
+    import base64
+    basic_auth = base64.b64encode(f":{token}".encode()).decode()
+    async with httpx.AsyncClient(timeout=15) as h:
+        url = f"{base_url.rstrip('/')}{path}"
+        r = await h.request(method, url,
+            headers={"Authorization": f"Basic {basic_auth}"},
+            json=json_body)
+    return r.status_code, (r.json() if r.content else {})
+
+
 @router.post("/forges/github", response_model=GitHubConnectOut, status_code=201)
 async def connect_github(body: GitHubConnectIn) -> GitHubConnectOut:
     status, me = await _gh(body.token, "/user")
@@ -69,9 +102,6 @@ async def connect_github(body: GitHubConnectIn) -> GitHubConnectOut:
         org_id = (await db.execute(text("SELECT id FROM organizations WHERE slug='default'"))).scalar_one()
         webhook_secret = _secrets.token_urlsafe(32)
         conn_id = str(uuid.uuid4())
-        # Store token + webhook secret in credential_ref/webhook_secret_ref refs;
-        # ponytail: refs point at .env-style keys via a per-connection lookup table.
-        # For dev, encode both directly in a small JSON blob in capabilities.
         await db.execute(text("""
             INSERT INTO forge_connections (id, org_id, forge_type, base_url, display_name,
                                             credential_ref, webhook_secret_ref, capabilities, status)
@@ -83,7 +113,7 @@ async def connect_github(body: GitHubConnectIn) -> GitHubConnectOut:
                 "sref": f"gh:conn:{conn_id}:secret",
                 "caps": json.dumps({
                     "github_user": user_login,
-                    "dev_token": body.token,        # ponytail: dev-only stash
+                    "dev_token": body.token,
                     "dev_webhook_secret": webhook_secret,
                 })})
         await db.commit()
@@ -92,12 +122,71 @@ async def connect_github(body: GitHubConnectIn) -> GitHubConnectOut:
                             github_user=user_login)
 
 
+@router.post("/forges/gitlab", status_code=201)
+async def connect_gitlab(body: GitLabConnectIn):
+    base_url = (body.base_url or "https://gitlab.com").rstrip("/")
+    status, me = await _gl(body.token, base_url, "/api/v4/user")
+    if status != 200 or not isinstance(me, dict) or "username" not in me:
+        raise HTTPException(400, f"GitLab rejected token ({status})")
+    username = me["username"]
+    
+    async with session_factory()() as db:
+        org_id = (await db.execute(text("SELECT id FROM organizations WHERE slug='default'"))).scalar_one()
+        webhook_secret = _secrets.token_urlsafe(32)
+        conn_id = str(uuid.uuid4())
+        await db.execute(text("""
+            INSERT INTO forge_connections (id, org_id, forge_type, base_url, display_name,
+                                            credential_ref, webhook_secret_ref, capabilities, status)
+            VALUES (:id, :org, 'gitlab', :base, :name,
+                    :cref, :sref, CAST(:caps AS jsonb), 'active')
+        """), {"id": conn_id, "org": str(org_id), "base": base_url,
+                "name": body.name or f"GitLab · {username}",
+                "cref": f"gl:conn:{conn_id}:token",
+                "sref": f"gl:conn:{conn_id}:secret",
+                "caps": json.dumps({
+                    "gitlab_user": username,
+                    "dev_token": body.token,
+                    "dev_webhook_secret": webhook_secret,
+                })})
+        await db.commit()
+    return {"id": conn_id, "forge_type": "gitlab", "display_name": body.name or f"GitLab · {username}"}
+
+
+@router.post("/forges/azure", status_code=201)
+async def connect_azure(body: AzureConnectIn):
+    base_url = body.base_url.rstrip("/")
+    status, res = await _az(body.token, base_url, "/_apis/projects?api-version=6.0")
+    if status != 200:
+        raise HTTPException(400, f"Azure DevOps verification failed (status {status})")
+        
+    async with session_factory()() as db:
+        org_id = (await db.execute(text("SELECT id FROM organizations WHERE slug='default'"))).scalar_one()
+        webhook_secret = _secrets.token_urlsafe(32)
+        conn_id = str(uuid.uuid4())
+        await db.execute(text("""
+            INSERT INTO forge_connections (id, org_id, forge_type, base_url, display_name,
+                                            credential_ref, webhook_secret_ref, capabilities, status)
+            VALUES (:id, :org, 'azure', :base, :name,
+                    :cref, :sref, CAST(:caps AS jsonb), 'active')
+        """), {"id": conn_id, "org": str(org_id), "base": base_url,
+                "name": body.name or f"Azure DevOps · {base_url.split('/')[-1]}",
+                "cref": f"az:conn:{conn_id}:token",
+                "sref": f"az:conn:{conn_id}:secret",
+                "caps": json.dumps({
+                    "dev_token": body.token,
+                    "dev_webhook_secret": webhook_secret,
+                })})
+        await db.commit()
+    return {"id": conn_id, "forge_type": "azure", "display_name": body.name or f"Azure DevOps · {base_url.split('/')[-1]}"}
+
+
 @router.get("/forges")
 async def list_forges() -> list[dict]:
     async with session_factory()() as db:
         rows = (await db.execute(text("""
             SELECT id::text, forge_type, display_name, base_url,
                    capabilities->>'github_user' AS github_user,
+                   capabilities->>'gitlab_user' AS gitlab_user,
                    capabilities->>'webhook_base_url' AS webhook_base_url,
                    status, created_at
             FROM forge_connections ORDER BY created_at DESC
@@ -111,8 +200,6 @@ class WebhookBaseIn(BaseModel):
 
 @router.put("/forges/{cid}/webhook-base")
 async def set_webhook_base(cid: str, body: WebhookBaseIn) -> dict:
-    """Persist the ngrok / public URL base on the connection so the user
-    doesn't have to re-enter it every time they enable a repo."""
     base = body.webhook_base_url.rstrip("/")
     async with session_factory()() as db:
         r = await db.execute(text("""
@@ -134,79 +221,189 @@ async def delete_forge(cid: str) -> None:
         await db.commit()
 
 
-async def _conn_token(conn_id: str) -> tuple[str, str]:
+async def _conn_token(conn_id: str) -> tuple[str, str, str, str]:
     async with session_factory()() as db:
         row = (await db.execute(text("""
-            SELECT capabilities FROM forge_connections WHERE id = :id AND forge_type = 'github'
+            SELECT forge_type, base_url, capabilities FROM forge_connections WHERE id = :id
         """), {"id": conn_id})).mappings().one_or_none()
     if row is None:
-        raise HTTPException(404, "github connection not found")
+        raise HTTPException(404, "Connection not found")
     caps = row["capabilities"] or {}
     token = caps.get("dev_token")
     secret = caps.get("dev_webhook_secret")
     if not token or not secret:
-        raise HTTPException(400, "connection missing stored credentials")
-    return token, secret
+        raise HTTPException(400, "Connection missing stored credentials")
+    return token, secret, row["forge_type"], row["base_url"]
 
 
 @router.get("/forges/{cid}/repos")
-async def list_github_repos(cid: str, per_page: int = 50) -> list[dict]:
-    token, _ = await _conn_token(cid)
-    status, data = await _gh(token, f"/user/repos?per_page={per_page}&sort=updated")
-    if status != 200 or not isinstance(data, list):
-        raise HTTPException(status_code=status if status else 500, detail=str(data)[:400])
-    return [{"full_name": r["full_name"], "private": r["private"], "default_branch": r["default_branch"],
-             "language": r.get("language"), "updated_at": r["updated_at"]} for r in data]
+async def list_forge_repos(cid: str) -> list[dict]:
+    token, _, forge_type, base_url = await _conn_token(cid)
+    
+    if forge_type == "github":
+        status, data = await _gh(token, "/user/repos?per_page=50&sort=updated")
+        if status != 200 or not isinstance(data, list):
+            raise HTTPException(status_code=status if status else 500, detail=str(data)[:400])
+        return [{"full_name": r["full_name"], "private": r["private"], "default_branch": r["default_branch"],
+                 "language": r.get("language"), "updated_at": r["updated_at"]} for r in data]
+                 
+    elif forge_type == "gitlab":
+        status, data = await _gl(token, base_url, "/api/v4/projects?membership=true&simple=true&per_page=50")
+        if status != 200 or not isinstance(data, list):
+            raise HTTPException(status_code=status if status else 500, detail=str(data)[:400])
+        return [{"full_name": p["path_with_namespace"], "private": p["visibility"] != "public", "default_branch": p["default_branch"],
+                 "language": None, "updated_at": p["last_activity_at"]} for p in data]
+                 
+    elif forge_type == "azure":
+        status, data = await _az(token, base_url, "/_apis/projects?api-version=6.0")
+        if status != 200 or not isinstance(data, dict):
+            raise HTTPException(status_code=status if status else 500, detail=str(data)[:400])
+        
+        projects = data.get("value", [])
+        repos = []
+        for proj in projects:
+            p_name = proj["name"]
+            r_status, r_data = await _az(token, base_url, f"/{p_name}/_apis/git/repositories?api-version=6.0")
+            if r_status == 200 and isinstance(r_data, dict):
+                for r in r_data.get("value", []):
+                    ref_branch = r.get("defaultBranch", "refs/heads/main")
+                    branch = ref_branch.replace("refs/heads/", "")
+                    repos.append({
+                        "full_name": f"{p_name}/{r['name']}",
+                        "private": True,
+                        "default_branch": branch,
+                        "language": None,
+                        "updated_at": None
+                    })
+        return repos
+    else:
+        raise HTTPException(400, f"Unsupported forge type: {forge_type}")
 
 
 @router.post("/forges/{cid}/repos/enable", response_model=RepoEnableOut, status_code=201)
 async def enable_repo(cid: str, body: RepoIn) -> RepoEnableOut:
-    token, secret = await _conn_token(cid)
-
-    # Verify repo exists + create webhook via GitHub API
-    status, repo_meta = await _gh(token, f"/repos/{body.full_name}")
-    if status != 200 or not isinstance(repo_meta, dict):
-        raise HTTPException(status, f"cannot access {body.full_name}: {str(repo_meta)[:200]}")
-
-    # Persist the webhook base URL on the connection for future reuse.
+    token, secret, forge_type, base_url = await _conn_token(cid)
+    
     base = body.webhook_url.split("/api/v1/webhooks/")[0].rstrip("/") if "/api/v1/webhooks/" in body.webhook_url else body.webhook_url.rstrip("/")
-    async with session_factory()() as db:
-        org_id = (await db.execute(text("SELECT id FROM organizations WHERE slug='default'"))).scalar_one()
-        await db.execute(text("""
-            UPDATE forge_connections
-              SET capabilities = jsonb_set(COALESCE(capabilities, '{}'::jsonb),
-                                            '{webhook_base_url}', to_jsonb(CAST(:b AS text)))
-              WHERE id = :id
-        """), {"b": base, "id": cid})
-        # Insert repositories row (idempotent per connection+external_id)
-        repo_id = str(uuid.uuid4())
-        await db.execute(text("""
-            INSERT INTO repositories (id, org_id, connection_id, external_id, full_name,
-                                       clone_url, default_branch, primary_language, is_enabled, config)
-            VALUES (:id, :org, :cid, :ext, :name, :url, :branch, :lang, true, '{}')
-            ON CONFLICT (connection_id, external_id) DO UPDATE
-              SET full_name = EXCLUDED.full_name, is_enabled = true
-            RETURNING id::text
-        """), {"id": repo_id, "org": str(org_id), "cid": cid,
-                "ext": str(repo_meta["id"]), "name": repo_meta["full_name"],
-                "url": repo_meta["clone_url"], "branch": repo_meta.get("default_branch") or "main",
-                "lang": (repo_meta.get("language") or "").lower() or None})
-        await db.commit()
-
-    # Register webhook on GitHub → point at user's public URL
-    hook_body = {
-        "name": "web",
-        "active": True,
-        "events": ["pull_request", "issue_comment"],
-        "config": {"url": body.webhook_url, "content_type": "json",
-                    "secret": secret, "insecure_ssl": "0"},
-    }
-    status, resp = await _gh(token, f"/repos/{body.full_name}/hooks",
-                              method="POST", json_body=hook_body)
-    webhook_id = resp.get("id") if isinstance(resp, dict) and status in (200, 201) else None
-    if webhook_id is None:
-        # If a hook already exists w/ same URL, don't consider this fatal
-        # ponytail: idempotence via check-then-create in M4
-        pass
-    return RepoEnableOut(id=repo_id, full_name=body.full_name,
-                          webhook_id=webhook_id, webhook_url=body.webhook_url)
+    
+    if forge_type == "github":
+        status, repo_meta = await _gh(token, f"/repos/{body.full_name}")
+        if status != 200 or not isinstance(repo_meta, dict):
+            raise HTTPException(status, f"cannot access {body.full_name}: {str(repo_meta)[:200]}")
+            
+        async with session_factory()() as db:
+            org_id = (await db.execute(text("SELECT id FROM organizations WHERE slug='default'"))).scalar_one()
+            await db.execute(text("""
+                UPDATE forge_connections
+                  SET capabilities = jsonb_set(COALESCE(capabilities, '{}'::jsonb),
+                                                '{webhook_base_url}', to_jsonb(CAST(:b AS text)))
+                  WHERE id = :id
+            """), {"b": base, "id": cid})
+            
+            repo_id = str(uuid.uuid4())
+            await db.execute(text("""
+                INSERT INTO repositories (id, org_id, connection_id, external_id, full_name,
+                                           clone_url, default_branch, primary_language, is_enabled, config)
+                VALUES (:id, :org, :cid, :ext, :name, :url, :branch, :lang, true, '{}')
+                ON CONFLICT (connection_id, external_id) DO UPDATE
+                  SET full_name = EXCLUDED.full_name, is_enabled = true
+                RETURNING id::text
+            """), {"id": repo_id, "org": str(org_id), "cid": cid,
+                    "ext": str(repo_meta["id"]), "name": repo_meta["full_name"],
+                    "url": repo_meta["clone_url"], "branch": repo_meta.get("default_branch") or "main",
+                    "lang": (repo_meta.get("language") or "").lower() or None})
+            await db.commit()
+            
+        hook_body = {
+            "name": "web",
+            "active": True,
+            "events": ["pull_request", "issue_comment"],
+            "config": {"url": body.webhook_url, "content_type": "json",
+                        "secret": secret, "insecure_ssl": "0"},
+        }
+        h_status, resp = await _gh(token, f"/repos/{body.full_name}/hooks",
+                                  method="POST", json_body=hook_body)
+        webhook_id = resp.get("id") if isinstance(resp, dict) and h_status in (200, 201) else None
+        return RepoEnableOut(id=repo_id, full_name=body.full_name,
+                              webhook_id=webhook_id, webhook_url=body.webhook_url)
+                              
+    elif forge_type == "gitlab":
+        import urllib.parse
+        encoded_path = urllib.parse.quote(body.full_name, safe="")
+        
+        status, project_meta = await _gl(token, base_url, f"/api/v4/projects/{encoded_path}")
+        if status != 200 or not isinstance(project_meta, dict):
+            raise HTTPException(status, f"cannot access project {body.full_name}: {str(project_meta)[:200]}")
+            
+        async with session_factory()() as db:
+            org_id = (await db.execute(text("SELECT id FROM organizations WHERE slug='default'"))).scalar_one()
+            await db.execute(text("""
+                UPDATE forge_connections
+                  SET capabilities = jsonb_set(COALESCE(capabilities, '{}'::jsonb),
+                                                '{webhook_base_url}', to_jsonb(CAST(:b AS text)))
+                  WHERE id = :id
+            """), {"b": base, "id": cid})
+            
+            repo_id = str(uuid.uuid4())
+            await db.execute(text("""
+                INSERT INTO repositories (id, org_id, connection_id, external_id, full_name,
+                                           clone_url, default_branch, primary_language, is_enabled, config)
+                VALUES (:id, :org, :cid, :ext, :name, :url, :branch, :lang, true, '{}')
+                ON CONFLICT (connection_id, external_id) DO UPDATE
+                  SET full_name = EXCLUDED.full_name, is_enabled = true
+                RETURNING id::text
+            """), {"id": repo_id, "org": str(org_id), "cid": cid,
+                    "ext": str(project_meta["id"]), "name": project_meta["path_with_namespace"],
+                    "url": project_meta["http_url_to_repo"], "branch": project_meta.get("default_branch") or "main",
+                    "lang": None})
+            await db.commit()
+            
+        hook_body = {
+            "url": body.webhook_url,
+            "push_events": False,
+            "merge_requests_events": True,
+            "note_events": True,
+            "token": secret
+        }
+        h_status, resp = await _gl(token, base_url, f"/api/v4/projects/{project_meta['id']}/hooks",
+                                  method="POST", json_body=hook_body)
+        webhook_id = resp.get("id") if isinstance(resp, dict) and h_status in (200, 201) else None
+        return RepoEnableOut(id=repo_id, full_name=body.full_name,
+                              webhook_id=webhook_id, webhook_url=body.webhook_url)
+                              
+    elif forge_type == "azure":
+        parts = body.full_name.split("/")
+        project_name = parts[0]
+        repo_name = parts[1]
+        
+        status, repo_meta = await _az(token, base_url, f"/{project_name}/_apis/git/repositories/{repo_name}?api-version=6.0")
+        if status != 200 or not isinstance(repo_meta, dict):
+            raise HTTPException(status, f"cannot access {body.full_name}: {str(repo_meta)[:200]}")
+            
+        async with session_factory()() as db:
+            org_id = (await db.execute(text("SELECT id FROM organizations WHERE slug='default'"))).scalar_one()
+            await db.execute(text("""
+                UPDATE forge_connections
+                  SET capabilities = jsonb_set(COALESCE(capabilities, '{}'::jsonb),
+                                                '{webhook_base_url}', to_jsonb(CAST(:b AS text)))
+                  WHERE id = :id
+            """), {"b": base, "id": cid})
+            
+            repo_id = str(uuid.uuid4())
+            await db.execute(text("""
+                INSERT INTO repositories (id, org_id, connection_id, external_id, full_name,
+                                           clone_url, default_branch, primary_language, is_enabled, config)
+                VALUES (:id, :org, :cid, :ext, :name, :url, :branch, :lang, true, '{}')
+                ON CONFLICT (connection_id, external_id) DO UPDATE
+                  SET full_name = EXCLUDED.full_name, is_enabled = true
+                RETURNING id::text
+            """), {"id": repo_id, "org": str(org_id), "cid": cid,
+                    "ext": str(repo_meta["id"]), "name": body.full_name,
+                    "url": repo_meta["webUrl"], "branch": repo_meta.get("defaultBranch", "refs/heads/main").replace("refs/heads/", ""),
+                    "lang": None})
+            await db.commit()
+            
+        return RepoEnableOut(id=repo_id, full_name=body.full_name,
+                              webhook_id=None, webhook_url=body.webhook_url)
+    else:
+        raise HTTPException(400, f"Unsupported forge type: {forge_type}")
