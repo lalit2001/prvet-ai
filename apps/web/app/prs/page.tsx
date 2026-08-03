@@ -3,7 +3,7 @@
 import clsx from "clsx";
 import {
   AlertOctagon, CheckCircle2, ChevronDown, ChevronRight, Clock,
-  FileCheck, FileText, Folder, FolderGit2, GitBranch, GitPullRequest, HelpCircle
+  FileCheck, FileText, Folder, FolderGit2, GitBranch, GitPullRequest, HelpCircle, MessageSquare
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -167,6 +167,13 @@ export default function PullRequestsPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Pull Request Analysis" subtitle="Manage issues and code fixes per pull request" />
+
+      <div className="bg-indigo-950/20 border border-indigo-500/20 text-indigo-200 px-4 py-3 rounded-lg flex gap-3 text-sm">
+        <MessageSquare className="w-5 h-5 text-indigo-400 shrink-0" />
+        <p>
+          <strong>Need clarification on a finding?</strong> Mention <code className="bg-indigo-950 px-1 py-0.5 rounded text-indigo-300">@prvet</code> in your GitHub or GitLab pull request comments, and the AI will reply directly on the thread!
+        </p>
+      </div>
 
       <div className="grid gap-6 lg:grid-cols-4">
         {/* Master List: Left Column */}
@@ -332,7 +339,6 @@ export default function PullRequestsPage() {
                                         Line {finding.start_line || "–"}
                                       </div>
                                     </div>
-
                                     <div>
                                       <h4 className="text-sm font-semibold text-text-1">
                                         <Link
@@ -348,28 +354,30 @@ export default function PullRequestsPage() {
                                     </div>
 
                                     {finding.suggested_patch && !resolved && (
-                                      <div className="mt-2 space-y-1">
-                                        <div className="text-[10px] uppercase tracking-wider text-text-3 font-mono">
-                                          Suggested Fix Diff
+                                      <div className="bg-[#101215] rounded-md border border-[#1f2328] overflow-hidden shadow-inner mt-4">
+                                        <div className="bg-[#15171b] px-3 py-1.5 border-b border-[#1f2328] flex items-center justify-between text-[11px] font-mono text-text-3">
+                                          <span>Suggested patch</span>
+                                          <div className="flex gap-2">
+                                            <button 
+                                              onClick={async (e) => {
+                                                e.stopPropagation();
+                                                try {
+                                                  await api.findings.resolve(finding.id, { method: "pr_ui_fix" });
+                                                  window.location.reload();
+                                                } catch (err) {
+                                                  alert("Failed to apply fix: " + err);
+                                                }
+                                              }}
+                                              className="bg-emerald-900/50 hover:bg-emerald-900 text-emerald-400 px-2 py-0.5 rounded transition-colors"
+                                            >
+                                              Fix Issue
+                                            </button>
+                                            <button className="hover:text-text-1 transition-colors">Apply manually</button>
+                                          </div>
                                         </div>
-                                        <div className="bg-[#07080a] border border-border p-2 rounded overflow-x-auto">
-                                          <pre className="text-[10px] font-mono text-text-2 leading-4">
-                                            {finding.suggested_patch.split("\n").map((line: string, idx: number) => {
-                                              const isAdded = line.startsWith("+") && !line.startsWith("+++");
-                                              const isRemoved = line.startsWith("-") && !line.startsWith("---");
-                                              return (
-                                                <div
-                                                  key={idx}
-                                                  className={clsx(
-                                                    "px-1.5",
-                                                    isAdded && "bg-emerald-950/30 text-emerald-300 border-l border-emerald-500",
-                                                    isRemoved && "bg-red-950/30 text-red-300 border-l border-red-500"
-                                                  )}
-                                                >
-                                                  {line}
-                                                </div>
-                                              );
-                                            })}
+                                        <div className="bg-[#07080a] p-2 overflow-x-auto">
+                                          <pre className="text-[11px] font-mono whitespace-pre text-text-2">
+                                            {finding.suggested_patch}
                                           </pre>
                                         </div>
                                       </div>

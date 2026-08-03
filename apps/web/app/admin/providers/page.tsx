@@ -119,7 +119,7 @@ export default function ProvidersPage() {
                     }
                   </div>
                   <div className="text-[11px] text-text-3">
-                    {p.enabled ? "enabled" : "disabled"} · {providerSummary(p)}
+                    {p.enabled ? "enabled" : "disabled"}
                   </div>
                 </CardBody>
               </Card>

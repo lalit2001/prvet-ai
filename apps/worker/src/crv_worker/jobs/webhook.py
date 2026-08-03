@@ -29,11 +29,26 @@ async def handle_forge_event(ctx, connection_id: str, external_event_id: str, ev
             pr_number = pr.get("number")
             repo_full_name = repo.get("full_name")
             if pr_number and repo_full_name:
-                # Enqueue pr_review — arq lookup by name is by function __qualname__.
-                # Since we imported pr_review into WorkerSettings.functions, arq registers it as "run".
-                # Use direct in-process call for now (M4 refactor moves to arq pool.enqueue).
                 from crv_worker.jobs.pr_review import run as pr_run
                 return await pr_run(ctx, connection_id=connection_id, pr_number=pr_number,
                                      repo_full_name=repo_full_name)
+
+    # GitHub issue_comment event → enqueue pr_reply
+    if event_type == "issue_comment":
+        action = payload.get("action")
+        if action == "created":
+            comment = payload.get("comment", {})
+            body = comment.get("body", "")
+            if "@prvet" in body.lower() or "@pr-analyzer" in body.lower() or "@prvet-ai" in body.lower():
+                repo = payload.get("repository", {})
+                issue = payload.get("issue", {})
+                pr_number = issue.get("number")
+                repo_full_name = repo.get("full_name")
+                comment_id = str(comment.get("id"))
+                if pr_number and repo_full_name:
+                    from crv_worker.jobs.pr_reply import run as reply_run
+                    return await reply_run(ctx, connection_id=connection_id, pr_number=pr_number,
+                                            repo_full_name=repo_full_name, comment_id=comment_id, body=body)
+
     print(f"[handle_forge_event] connection={connection_id} event={event_type} — no dispatch")
     return {"connection_id": connection_id, "event_type": event_type, "status": "no_dispatch"}

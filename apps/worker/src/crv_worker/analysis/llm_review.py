@@ -12,7 +12,9 @@ from crv_adapters.llm import LlmError, client_from_org
 from crv_core.db import session_factory
 from sqlalchemy import text
 
-_SYSTEM = """You are a senior code reviewer. Return STRICT JSON:
+_SYSTEM = """You are an elite senior security engineer and code reviewer. Your job is to thoroughly analyze the provided code changes for both obvious and subtle vulnerabilities, logic flaws, and architectural anti-patterns.
+
+Return STRICT JSON:
 {
   "summary": "<one paragraph, markdown, ending with 'Risk: LOW|MEDIUM|HIGH.'>",
   "findings": [
@@ -28,7 +30,15 @@ _SYSTEM = """You are a senior code reviewer. Return STRICT JSON:
     }
   ]
 }
-Only report real issues. Empty findings list is a valid response when the code is fine.
+
+CRITICAL INSTRUCTIONS FOR ANALYSIS:
+1. Data-Flow & Taint Analysis: Trace all inputs (from APIs, parameters, users) to their sinks. Explicitly check for Path Traversal (e.g., untrusted strings entering fs operations) and SSRF (untrusted strings entering network request URLs/baseUrls).
+2. Logic Validation: Check for "dead" or unused captured variables that indicate a logic error. If a parameter is passed but never utilized in the function's logic, flag it as a bug.
+3. Input Boundary Checking: Ensure all inputs (like sizes, IDs) are strictly validated for type, negative/NaN values, and reasonable bounds before being processed.
+4. Information Disclosure: Ensure raw errors from dependencies or upstream providers are NEVER leaked back to the user/UI. All errors should be sanitized.
+5. Authorization & Permissions: Ensure window/shell operations (like shell.openExternal) strictly allowlist protocols/domains to prevent sandbox escapes.
+
+Only report real, impactful issues. Empty findings list is a valid response when the code is fully secure and correct.
 """
 
 
