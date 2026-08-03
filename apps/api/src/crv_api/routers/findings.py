@@ -227,3 +227,56 @@ async def list_prs():
         # Sort PRs by latest created_at
         prs.sort(key=lambda x: x["created_at"], reverse=True)
         return prs
+
+
+@router.get("/repos/{repo_name:path}/prs/{pr_number}/gate")
+async def get_pr_gate_status(repo_name: str, pr_number: int):
+    async with session_factory()() as db:
+        repo_row = (await db.execute(text("""
+            SELECT id::text, config FROM repositories WHERE full_name = :repo
+        """), {"repo": repo_name})).mappings().one_or_none()
+        
+        if not repo_row:
+            raise HTTPException(404, "Repository not found")
+            
+        repo_id = repo_row["id"]
+        repo_cfg = repo_row["config"] or {}
+        
+        review_cfg = repo_cfg.get("review", {})
+        block_severity = review_cfg.get("block_severity", "high")
+        gated_categories = review_cfg.get("categories", ["security", "bug", "performance"])
+        
+        run_row = (await db.execute(text("""
+            SELECT id::text FROM runs
+            WHERE repo_id = :repo_id AND pr_number = :pr_num
+            ORDER BY created_at DESC LIMIT 1
+        """), {"repo_id": repo_id, "pr_num": pr_number})).mappings().one_or_none()
+        
+        if not run_row:
+            return {"passed": True, "reason": "No review run has been recorded for this PR yet."}
+            
+        run_id = run_row["id"]
+        
+        findings = (await db.execute(text("""
+            SELECT category, severity, title, file_path, start_line
+            FROM findings
+            WHERE run_id = :run_id AND status = 'open'
+        """), {"run_id": run_id})).mappings().all()
+        
+    SEV_MAP = {"critical": 5, "high": 4, "medium": 3, "low": 2, "info": 1}
+    threshold_val = SEV_MAP.get(block_severity.lower(), 4)
+    
+    for f in findings:
+        f_sev = f["severity"].lower()
+        f_cat = f["category"].lower()
+        f_val = SEV_MAP.get(f_sev, 2)
+        
+        if f_cat in [c.lower() for c in gated_categories] and f_val >= threshold_val:
+            loc = f"{f['file_path']}:{f['start_line'] or '–'}"
+            return {
+                "passed": False,
+                "reason": f"Gating violation: [{f_sev.upper()}] {f['title']} in {loc} ({f_cat})"
+            }
+            
+    return {"passed": True, "reason": "All check gates passed successfully."}
+
