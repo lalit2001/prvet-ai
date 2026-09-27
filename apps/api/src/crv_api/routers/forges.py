@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 
 from crv_core.db import session_factory
+from crv_worker.forge_token import connection_auth
 
 router = APIRouter()
 
@@ -186,6 +187,10 @@ async def list_forges() -> list[dict]:
         rows = (await db.execute(text("""
             SELECT id::text, forge_type, display_name, base_url,
                    capabilities->>'github_user' AS github_user,
+                   capabilities->>'installation_id' AS installation_id,
+                   capabilities->>'app_uuid' AS app_uuid,
+                   capabilities->>'account' AS account,
+                   (SELECT count(*) FROM repositories r WHERE r.connection_id = forge_connections.id AND r.is_enabled) AS repo_count,
                    capabilities->>'gitlab_user' AS gitlab_user,
                    capabilities->>'webhook_base_url' AS webhook_base_url,
                    status, created_at
@@ -222,18 +227,20 @@ async def delete_forge(cid: str) -> None:
 
 
 async def _conn_token(conn_id: str) -> tuple[str, str, str, str]:
-    async with session_factory()() as db:
-        row = (await db.execute(text("""
-            SELECT forge_type, base_url, capabilities FROM forge_connections WHERE id = :id
-        """), {"id": conn_id})).mappings().one_or_none()
-    if row is None:
-        raise HTTPException(404, "Connection not found")
-    caps = row["capabilities"] or {}
-    token = caps.get("dev_token")
-    secret = caps.get("dev_webhook_secret")
-    if not token or not secret:
+    try:
+        a = await connection_auth(conn_id)
+    except LookupError as e:
+        raise HTTPException(404, str(e))
+    if not a.webhook_secret:
         raise HTTPException(400, "Connection missing stored credentials")
-    return token, secret, row["forge_type"], row["base_url"]
+    return a.token, a.webhook_secret, a.forge_type, a.base_url
+
+
+async def _is_installation(conn_id: str) -> bool:
+    async with session_factory()() as db:
+        v = (await db.execute(text("SELECT capabilities->>'installation_id' FROM forge_connections WHERE id = :id"),
+                              {"id": conn_id})).scalar_one_or_none()
+    return bool(v)
 
 
 @router.get("/forges/{cid}/repos")
@@ -241,9 +248,13 @@ async def list_forge_repos(cid: str) -> list[dict]:
     token, _, forge_type, base_url = await _conn_token(cid)
     
     if forge_type == "github":
-        status, data = await _gh(token, "/user/repos?per_page=50&sort=updated")
-        if status != 200 or not isinstance(data, list):
-            raise HTTPException(status_code=status if status else 500, detail=str(data)[:400])
+        if await _is_installation(cid):
+            from crv_adapters.forge.github_app import list_installation_repos
+            data = await list_installation_repos(token, api_base=base_url or _GH)
+        else:
+            status, data = await _gh(token, "/user/repos?per_page=50&sort=updated")
+            if status != 200 or not isinstance(data, list):
+                raise HTTPException(status_code=status if status else 500, detail=str(data)[:400])
         return [{"full_name": r["full_name"], "private": r["private"], "default_branch": r["default_branch"],
                  "language": r.get("language"), "updated_at": r["updated_at"]} for r in data]
                  
@@ -313,7 +324,10 @@ async def enable_repo(cid: str, body: RepoIn) -> RepoEnableOut:
                     "url": repo_meta["clone_url"], "branch": repo_meta.get("default_branch") or "main",
                     "lang": (repo_meta.get("language") or "").lower() or None})
             await db.commit()
-            
+
+        if await _is_installation(cid):
+            # App installations deliver every event to the app-level hook — nothing to register per repo
+            return RepoEnableOut(id=repo_id, full_name=body.full_name, webhook_id=None, webhook_url="(GitHub App)")
         hook_body = {
             "name": "web",
             "active": True,

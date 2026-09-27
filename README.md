@@ -71,19 +71,38 @@ sudo chmod +x /usr/local/bin/prvet
 
 ---
 
-## 4. Key Diagnostic Workspaces
+## 4. Install as a GitHub App (recommended)
 
-### A. AST Workspace
-Located under **Configure -> AST Viewer** (Admin only). It lets you select any file in your configured Git projects or paste custom code snippets:
-1. Displays the raw **Source Code** and **Abstract Syntax Tree (AST)** side-by-side.
-2. **Bidirectional Highlighting:** Click any code line to locate and highlight its corresponding AST node, or click any AST node to highlight and scroll to its code coordinate.
+No personal tokens, org-wide, one webhook, and the merge gate shows up as a **check run** you can make required in branch protection.
+
+1. Set `PUBLIC_URL` (API, reachable by GitHub — e.g. an ngrok URL in dev) and `WEB_URL` in `.env`, restart the API.
+2. **Configure → GitHub / Forges → Register app on GitHub.** You are sent to GitHub's manifest flow, approve, and land back in the UI with the app created.
+3. Click **Install on GitHub**, pick repositories. Each installation appears as a connection; its repositories are enabled automatically and every PR gets reviewed.
+
+Personal-access-token connections still work for GitLab, Azure DevOps, self-hosted forges and quick local experiments.
+
+## 5. How a PR is reviewed
+
+`graph → sast → triage → review → verify → gate → post`
+
+1. **Graph** — diff lines are mapped onto the symbol graph from the latest baseline; callers of every changed symbol (blast radius, depth 2) are collected.
+2. **SAST** — Semgrep runs the bundled rules (`packages/rules/semgrep`) plus rules authored in **Configure → Rules** on the head-SHA contents.
+3. **Triage** — the *fast* model routes each file to `skip | fast | deep`; lockfiles/docs are skipped and security-sensitive paths or widely-called symbols are forced to `deep` without asking.
+4. **Review** — the fast or deep model reviews each file with the callers' source packed into the prompt.
+5. **Verify** — critical/high LLM findings are re-checked by the fast model; unconfirmed ones are dropped.
+6. **Gate** — SAST and LLM findings are deduplicated and fingerprinted (stable across line shifts; findings that vanish on the next push auto-resolve), a risk score (0–100) and a `pass|block` decision are written, and posted as a check run (App) or commit status (PAT).
+7. **Post** — one batched review: summary, severity table, findings, blast-radius table, inline comments.
+
+## 6. Code Explorer
+
+**Overview → Code Explorer** shows the symbol graph behind blast-radius review: file tree, code with symbol markers, an interactive **dependency graph** of file imports, and an inspector with outline · imports · imported-by · callers · callees · **blast radius** for any symbol. Fuzzy symbol search is in the header; the raw parse tree is still available as a tab.
 
 ### B. SonarQube-style Repos Workspace
 Review baseline metrics, security ratings (A–E grades), and open issues inside the master-detail explorer. Supports manually dismissing false positives directly from the panel.
 
 ---
 
-## 5. Local Development (Without Docker)
+## 7. Local Development (Without Docker)
 
 To run the backend API, background worker, and Next.js web application individually on your host system:
 
@@ -96,10 +115,10 @@ brew services start redis
 ```
 
 ### B. Run API Server
-From the project root:
+From the project root (install all workspace packages once with `uv sync --all-packages --all-extras`; the `sast` extra brings Semgrep):
 ```bash
 cd apps/api
-uv run uvicorn crv_api.main:app --reload --port 8000
+uv run uvicorn crv_api.main:app --reload --port 8080
 ```
 
 ### C. Run Async Worker

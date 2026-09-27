@@ -6,7 +6,7 @@ COPY pyproject.toml ./
 COPY packages/core     packages/core
 COPY packages/adapters packages/adapters
 COPY apps/worker       apps/worker
-RUN uv pip install --system --no-cache -e packages/core -e packages/adapters -e apps/worker
+RUN uv pip install --system --no-cache -e packages/core -e packages/adapters -e "apps/worker[sast]"
 
 FROM python:3.12-slim AS runtime
 ENV PYTHONUNBUFFERED=1

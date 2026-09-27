@@ -8,6 +8,8 @@ dependencies = [
     "httpx>=0.27",
     "litellm>=1.55",
     "boto3>=1.34",           # LiteLLM Bedrock provider — imported at call time
+    "pyjwt>=2.8",
+    "cryptography>=42",      # RS256 for GitHub App JWTs
 ]
 
 [project.optional-dependencies]

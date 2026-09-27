@@ -23,6 +23,8 @@ class Settings(BaseSettings):
 
     # Deployment mode
     deployment_mode: Literal["standard", "airgap"] = "standard"
+    public_url: str = "http://localhost:8080"   # where forges reach the API (webhooks, manifest callback)
+    web_url: str = "http://localhost:3737"      # where humans reach the UI (setup redirects, check-run links)
 
     # Datastores
     database_url: str = "postgresql+asyncpg://crv:crv@localhost:5432/crv"

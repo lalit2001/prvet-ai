@@ -1,0 +1,98 @@
+rules:
+  - id: prvet.py.eval-exec
+    languages: [python]
+    severity: ERROR
+    message: "eval()/exec() on dynamic input allows arbitrary code execution."
+    metadata: { category: security, cwe: "CWE-95" }
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: exec(...)
+    pattern-not: eval("...")
+  - id: prvet.py.subprocess-shell-true
+    languages: [python]
+    severity: ERROR
+    message: "subprocess with shell=True and a non-literal command is a shell-injection risk."
+    metadata: { category: security, cwe: "CWE-78" }
+    patterns:
+      - pattern: subprocess.$F(..., shell=True, ...)
+      - pattern-not: subprocess.$F("...", shell=True, ...)
+  - id: prvet.py.sql-string-format
+    languages: [python]
+    severity: WARNING
+    message: "SQL built with string formatting — use bound parameters."
+    metadata: { category: security, cwe: "CWE-89" }
+    pattern-either:
+      - pattern: $CUR.execute($Q % ...)
+      - pattern: $CUR.execute($Q.format(...))
+      - pattern: $CUR.execute(f"...")
+  - id: prvet.py.yaml-unsafe-load
+    languages: [python]
+    severity: ERROR
+    message: "yaml.load without SafeLoader can instantiate arbitrary objects."
+    metadata: { category: security, cwe: "CWE-502" }
+    patterns:
+      - pattern: yaml.load($X)
+  - id: prvet.py.pickle-loads
+    languages: [python]
+    severity: WARNING
+    message: "pickle deserialisation of untrusted data executes code."
+    metadata: { category: security, cwe: "CWE-502" }
+    pattern: pickle.$F(...)
+  - id: prvet.py.requests-verify-false
+    languages: [python]
+    severity: WARNING
+    message: "TLS verification disabled."
+    metadata: { category: security, cwe: "CWE-295" }
+    pattern: requests.$M(..., verify=False, ...)
+  - id: prvet.py.bare-except-pass
+    languages: [python]
+    severity: INFO
+    message: "Swallowed exception hides failures."
+    metadata: { category: bug }
+    pattern: |
+      try:
+        ...
+      except:
+        pass
+  - id: prvet.js.eval
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: "eval()/new Function() on dynamic input allows arbitrary code execution."
+    metadata: { category: security, cwe: "CWE-95" }
+    pattern-either:
+      - pattern: eval($X)
+      - pattern: new Function(...)
+  - id: prvet.js.innerhtml-assign
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: "Assigning non-literal HTML to innerHTML is an XSS sink."
+    metadata: { category: security, cwe: "CWE-79" }
+    patterns:
+      - pattern: $EL.innerHTML = $X
+      - pattern-not: $EL.innerHTML = "..."
+  - id: prvet.js.dangerously-set-inner-html
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: "dangerouslySetInnerHTML with non-literal content is an XSS sink."
+    metadata: { category: security, cwe: "CWE-79" }
+    patterns:
+      - pattern: 'dangerouslySetInnerHTML={{ __html: $X }}'
+      - pattern-not: 'dangerouslySetInnerHTML={{ __html: "..." }}'
+  - id: prvet.js.child-process-exec
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: "child_process.exec with a non-literal command is a shell-injection risk."
+    metadata: { category: security, cwe: "CWE-78" }
+    patterns:
+      - pattern-either:
+          - pattern: exec($CMD, ...)
+          - pattern: execSync($CMD, ...)
+      - pattern-not: exec("...", ...)
+      - pattern-not: execSync("...", ...)
+  - id: prvet.generic.hardcoded-secret
+    languages: [python, javascript, typescript]
+    severity: ERROR
+    message: "Possible hard-coded credential."
+    metadata: { category: security, cwe: "CWE-798" }
+    pattern-either:
+      - pattern-regex: '(?i)(api[_-]?key|secret|password|passwd|token)\s*[:=]\s*["''][A-Za-z0-9_\-/+=]{16,}["'']'
