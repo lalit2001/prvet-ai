@@ -1,9 +1,11 @@
 """Baseline job — PRD F4.
 
-Two phases:
-  1. INDEXING  — walk files, extract symbols (Python via ast; JS/TS via
+Phases:
+  1. INDEXING  — walk files, extract FileFacts (Python via ast; JS/TS via
                  tree-sitter), persist files + symbols.
-  2. REVIEWING — pick top-K non-test files by LOC, LLM-review each,
+  1b. LINKING  — resolve imports/references across the repo, persist
+                 symbol_references + file_imports, record resolution rate.
+  2. REVIEWING — pick top-K non-test files by fan-in, LLM-review each,
                  persist findings. Respects BASELINE_MAX_COST_USD.
 
 Progress is written back into runs.stats after each file so the UI can poll.
@@ -24,7 +26,9 @@ from crv_core.db import session_factory
 from crv_core.settings import get_settings
 from crv_worker.analysis.llm_review import review as llm_review, summarize_project
 from crv_worker.indexing import pyast, treesitter
-from crv_worker.indexing.persist import replace_symbols, upsert_file
+from crv_worker.indexing.persist import (load_symbol_ids, replace_file_imports, replace_references,
+                                         replace_symbols, update_ref_stats, upsert_file)
+from crv_worker.indexing.resolve import IndexedFile, resolve
 from crv_worker.indexing.walker import walk
 
 # Rough per-call cost estimate (USD) — used for the budget cap before we have
@@ -41,8 +45,8 @@ def _lang_for(path: Path) -> str | None:
 
 def _extract(path: Path, mkey: str, lang: str):
     if lang == "python":
-        return pyast.extract_symbols(path, mkey)
-    return treesitter.extract_symbols(path, mkey)
+        return pyast.extract(path, mkey)
+    return treesitter.extract(path, mkey)
 
 
 def _is_testy(rel_path: str) -> bool:
@@ -69,6 +73,9 @@ async def run(ctx, repo_id: str, local_path: str, commit_sha: str,
 
     if force:
         async with session_factory()() as db:
+            # baselines / webhook_events reference runs without ON DELETE CASCADE
+            await db.execute(text("DELETE FROM baselines WHERE run_id IN (SELECT id FROM runs WHERE idempotency_key = :key)"), {"key": key})
+            await db.execute(text("UPDATE webhook_events SET run_id = NULL WHERE run_id IN (SELECT id FROM runs WHERE idempotency_key = :key)"), {"key": key})
             await db.execute(text("DELETE FROM runs WHERE idempotency_key = :key"), {"key": key})
             await db.commit()
 
@@ -92,7 +99,8 @@ async def run(ctx, repo_id: str, local_path: str, commit_sha: str,
     stats: dict = {
         "phase": "indexing",
         "files_seen": 0, "files_indexed": 0, "files_skipped": 0,
-        "symbols": 0, "by_language": {},
+        "symbols": 0, "references": 0, "file_imports": 0, "resolution_rate": None,
+        "by_language": {},
         "hotspots_total": 0, "hotspots_done": 0,
         "findings": 0, "cost_usd": 0.0,
     }
@@ -135,6 +143,8 @@ async def _do_baseline(run_id: str, repo_id: str, commit_sha: str,
                         root: Path, stats: dict, started: datetime, settings) -> dict:
     # ── Phase 1: index ─────────────────────────────────────────────────────
     indexed: list[dict] = []  # for hotspot ranking
+    facts_files: list[IndexedFile] = []
+    file_ids: dict[str, str] = {}
     async with session_factory()() as db:
         write_every = 20
         i = 0
@@ -144,18 +154,20 @@ async def _do_baseline(run_id: str, repo_id: str, commit_sha: str,
             if lang is None:
                 stats["files_skipped"] += 1
                 continue
-            rel = str(path.relative_to(root))
+            rel = path.relative_to(root).as_posix()
             try:
                 body = path.read_text(errors="replace")
                 loc = body.count("\n") + 1
                 mkey = pyast.module_key_for(path, root)
-                syms = _extract(path, mkey, lang)
+                facts = _extract(path, mkey, lang)
                 file_id = await upsert_file(db, repo_id, rel, lang, pyast.content_hash(path), loc, commit_sha)
-                await replace_symbols(db, repo_id, file_id, syms)
+                await replace_symbols(db, repo_id, file_id, facts.symbols)
+                file_ids[rel] = file_id
+                facts_files.append(IndexedFile(rel, lang, mkey, facts))
                 stats["files_indexed"] += 1
-                stats["symbols"] += len(syms)
+                stats["symbols"] += len(facts.symbols)
                 stats["by_language"][lang] = stats["by_language"].get(lang, 0) + 1
-                indexed.append({"path": rel, "loc": loc, "lang": lang})
+                indexed.append({"path": rel, "loc": loc, "lang": lang, "fan_in": 0})
                 i += 1
                 if i % write_every == 0:
                     await db.commit()
@@ -163,6 +175,35 @@ async def _do_baseline(run_id: str, repo_id: str, commit_sha: str,
             except Exception as e:
                 print(f"[baseline] skipped {rel}: {e}")
         await db.commit()
+
+    # ── Phase 1b: link ─────────────────────────────────────────────────────
+    stats["phase"] = "linking"
+    await _write_stats(run_id, stats)
+    graph = resolve(facts_files, root)
+    edges_by_file: dict[str, list] = {}
+    for e in graph.edges:
+        edges_by_file.setdefault(e.file, []).append(e)
+    imports_by_file: dict[str, list[tuple[str, int, str]]] = {}
+    for frm, to, line, spec in graph.file_imports:
+        imports_by_file.setdefault(frm, []).append((to, line, spec))
+    fan_in: dict[str, int] = {}
+    for frm, to, _, _ in graph.file_imports:
+        fan_in[to] = fan_in.get(to, 0) + 1
+    for f in indexed:
+        f["fan_in"] = fan_in.get(f["path"], 0)
+    async with session_factory()() as db:
+        # files that vanished since the last index (cascade drops their symbols/refs)
+        gone = await db.execute(text("DELETE FROM files WHERE repo_id = :rid AND NOT (path = ANY(CAST(:paths AS text[])))"),
+                                {"rid": repo_id, "paths": list(file_ids)})
+        stats["files_removed"] = gone.rowcount
+        key_to_id = await load_symbol_ids(db, repo_id)
+        for rel, fid in file_ids.items():
+            stats["references"] += await replace_references(db, repo_id, fid, edges_by_file.get(rel, []), key_to_id)
+            stats["file_imports"] += await replace_file_imports(db, repo_id, fid, imports_by_file.get(rel, []), file_ids)
+            await update_ref_stats(db, fid, graph.resolved.get(rel, 0), graph.unresolved.get(rel, 0))
+        await db.commit()
+    r, u = sum(graph.resolved.values()), sum(graph.unresolved.values())
+    stats["resolution_rate"] = round(r / (r + u), 3) if (r + u) else None
 
     # ── Phase 2: hotspot LLM review ────────────────────────────────────────
     stats["phase"] = "reviewing"
@@ -242,10 +283,10 @@ def _hotspot_count(indexed: list[dict]) -> int:
 
 
 def _pick_hotspots(indexed: list[dict], k: int) -> list[dict]:
-    # Filter out test-y files and prefer larger, non-trivial files.
-    # LOC as a proxy for hotspot importance until we have churn + fan-in.
+    # Most-imported files first (a bug there hurts the most), LOC breaks ties.
+    # ponytail: churn (git log --numstat) would sharpen this; add when fan-in alone misranks.
     candidates = [f for f in indexed if not _is_testy(f["path"]) and f["loc"] >= 40]
-    candidates.sort(key=lambda f: (-f["loc"], f["path"]))
+    candidates.sort(key=lambda f: (-f.get("fan_in", 0), -f["loc"], f["path"]))
     return candidates[:k]
 
 

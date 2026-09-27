@@ -1,12 +1,12 @@
 "use client";
 
-import { AlertOctagon, Bot, FolderGit2, Play } from "lucide-react";
+import { AlertOctagon, Bot, FolderGit2, GitFork, Network, Play, Radar } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
   Area, AreaChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { api, type Finding, type Provider, type Repo, type Run } from "@/lib/api";
+import { api, type Finding, type GraphSummary, type Provider, type Repo, type Run } from "@/lib/api";
 import {
   Card, CardBody, CardHeader, EmptyState, PageHeader, SeverityBadge,
   StatCard, StatusPill, TBody, TD, TH, THead, TR, Table,
@@ -22,6 +22,7 @@ export default function Dashboard() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [findings, setFindings] = useState<Array<Finding & { repo: string; repo_id: string }>>([]);
   const [selectedRepo, setSelectedRepo] = useState<string>("all");
+  const [graphs, setGraphs] = useState<Record<string, GraphSummary>>({});
 
   useEffect(() => {
     (async () => {
@@ -34,8 +35,25 @@ export default function Dashboard() {
         return fs.map(f => ({ ...f, repo: r.full_name, repo_id: r.id }));
       }));
       setFindings(all.flat());
+      const gs = await Promise.all(rs.map(async r => [r.id, await api.graph.summary(r.id).catch(() => null)] as const));
+      setGraphs(Object.fromEntries(gs.filter(([, g]) => g && g.symbols > 0) as Array<[string, GraphSummary]>));
     })();
   }, []);
+
+  const graph = useMemo(() => {
+    const ids = selectedRepo === "all" ? Object.keys(graphs) : [selectedRepo].filter(id => graphs[id]);
+    if (ids.length === 0) return null;
+    const name = (id: string) => repos.find(r => r.id === id)?.full_name.split("/").pop() ?? "";
+    const sum = (k: "files" | "symbols" | "references" | "file_imports" | "resolved" | "unresolved") => ids.reduce((a, id) => a + (graphs[id][k] ?? 0), 0);
+    const resolved = sum("resolved"), unresolved = sum("unresolved");
+    return {
+      files: sum("files"), symbols: sum("symbols"), references: sum("references"), file_imports: sum("file_imports"),
+      rate: resolved + unresolved ? resolved / (resolved + unresolved) : null,
+      topFiles: ids.flatMap(id => graphs[id].top_files.map(f => ({ ...f, repo_id: id, repo: name(id) }))).sort((a, b) => b.fan_in - a.fan_in).slice(0, 7),
+      topSymbols: ids.flatMap(id => graphs[id].top_symbols.map(s => ({ ...s, repo_id: id, repo: name(id) }))).sort((a, b) => b.callers - a.callers).slice(0, 7),
+      langs: Object.entries(ids.flatMap(id => graphs[id].by_language).reduce<Record<string, number>>((acc, l) => { acc[l.language] = (acc[l.language] || 0) + l.files; return acc; }, {})).sort((a, b) => b[1] - a[1]),
+    };
+  }, [graphs, selectedRepo, repos]);
 
   const scopedFindings = useMemo(() =>
     selectedRepo === "all" ? findings : findings.filter(f => f.repo_id === selectedRepo),
@@ -142,6 +160,65 @@ export default function Dashboard() {
             )}
           </CardBody>
         </Card>
+      </div>
+
+      <div className="mt-6">
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-text-1">Code graph</h2>
+            <p className="text-xs text-text-3">Symbols and cross-file links from the latest baseline — this is what blast-radius review is built on.</p>
+          </div>
+          <Link href={selectedRepo === "all" ? "/explorer" : `/explorer?repo=${selectedRepo}&pane=graph`} className="text-xs text-emerald-400 hover:underline">Open explorer →</Link>
+        </div>
+        {!graph ? (
+          <Card><CardBody><EmptyState icon={Network} title="No graph indexed yet" hint="Run a baseline on a repository to build its symbol graph." /></CardBody></Card>
+        ) : (
+          <>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <StatCard icon={FolderGit2} label="Indexed files" value={graph.files}
+                hint={graph.langs.map(([l, n]) => `${l} ${n}`).join(" · ") || "—"} />
+              <StatCard icon={Network} label="Symbols" value={graph.symbols} hint="classes, functions, methods, types" />
+              <StatCard icon={GitFork} label="References" value={graph.references} hint={`${graph.file_imports} file→file imports`} />
+              <StatCard icon={Radar} label="Resolution" value={graph.rate === null ? "—" : `${Math.round(graph.rate * 100)}%`}
+                hint="internal refs linked to a definition" tone={graph.rate !== null && graph.rate < 0.8 ? "warn" : "success"} />
+            </div>
+            <div className="mt-4 grid gap-6 lg:grid-cols-2">
+              <Card>
+                <CardHeader title="Most depended-on files" subtitle="by number of importing files" />
+                <CardBody className="p-0">
+                  <ul className="divide-y divide-border">
+                    {graph.topFiles.map(f => (
+                      <li key={f.repo_id + f.path}>
+                        <Link href={`/explorer?repo=${f.repo_id}&path=${encodeURIComponent(f.path)}`} className="flex items-center gap-3 px-4 py-2 hover:bg-panel-2">
+                          <span className="mono truncate text-xs text-text-1">{f.path}</span>
+                          <span className="ml-auto shrink-0 text-[10px] text-text-3">{f.language} · {f.loc} LOC</span>
+                          <span className="shrink-0 rounded bg-emerald-950/60 px-1.5 text-[10px] tabular-nums text-emerald-400">{f.fan_in} importers</span>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                </CardBody>
+              </Card>
+              <Card>
+                <CardHeader title="Most called symbols" subtitle="a change here has the widest blast radius" />
+                <CardBody className="p-0">
+                  <ul className="divide-y divide-border">
+                    {graph.topSymbols.map(s => (
+                      <li key={s.id}>
+                        <Link href={`/explorer?repo=${s.repo_id}&symbol=${s.id}`} className="flex items-center gap-3 px-4 py-2 hover:bg-panel-2">
+                          <span className="w-14 shrink-0 text-[10px] uppercase text-text-3">{s.kind}</span>
+                          <span className="mono truncate text-xs text-text-1">{s.name}</span>
+                          <span className="mono ml-auto truncate text-[10px] text-text-3">{s.path}:{s.start_line}</span>
+                          <span className="shrink-0 rounded bg-emerald-950/60 px-1.5 text-[10px] tabular-nums text-emerald-400">{s.callers} callers</span>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                </CardBody>
+              </Card>
+            </div>
+          </>
+        )}
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-3">
