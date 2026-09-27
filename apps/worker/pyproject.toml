@@ -11,10 +11,12 @@ dependencies = [
     "tree-sitter>=0.23",
     "tree-sitter-javascript>=0.25.0",
     "tree-sitter-typescript>=0.23.2",
+    "pyyaml>=6",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-asyncio>=0.24"]
+sast = ["semgrep>=1.90"]
 
 [build-system]
 requires = ["hatchling"]

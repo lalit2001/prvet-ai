@@ -9,9 +9,11 @@ import { Button, Card, CardBody, CardHeader, Chip, EmptyState, Modal, PageHeader
 type Forge = {
   id: string; forge_type: string; display_name: string;
   base_url: string; github_user: string | null; gitlab_user: string | null;
-  webhook_base_url: string | null;
+  webhook_base_url: string | null; installation_id: string | null; app_uuid: string | null;
+  account: string | null; repo_count: number;
   status: string; created_at: string;
 };
+type GhApp = { id: string; app_id: string; slug: string; name: string; html_url: string | null; status: string; installations: number; install_url: string | null };
 type Repo = { full_name: string; private: boolean; default_branch: string; language: string | null; updated_at: string };
 
 function GithubIcon({ className }: { className?: string }) {
@@ -32,7 +34,8 @@ function GitlabIcon({ className }: { className?: string }) {
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(`${apiBaseUrl()}${path}`, { ...init, headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) } });
+  const token = typeof window !== "undefined" ? localStorage.getItem("crv_token") : null;
+  const r = await fetch(`${apiBaseUrl()}${path}`, { ...init, headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(init?.headers ?? {}) } });
   const body = await r.text();
   if (!r.ok) throw new Error(`${r.status}: ${body.slice(0, 400)}`);
   return body ? JSON.parse(body) as T : ({} as T);
@@ -54,8 +57,40 @@ export default function ForgesPage() {
   const [editingBaseVal, setEditingBaseVal] = useState("");
   const [enableResult, setEnableResult] = useState<{ webhook_id: number | null; webhook_url: string } | null>(null);
 
-  async function refresh() { setForges(await req<Forge[]>("/api/v1/forges").catch(() => [])); }
-  useEffect(() => { refresh(); }, []);
+  const [apps, setApps] = useState<GhApp[]>([]);
+  const [appOrg, setAppOrg] = useState("");
+  const [appBusy, setAppBusy] = useState(false);
+
+  async function refresh() {
+    setForges(await req<Forge[]>("/api/v1/forges").catch(() => []));
+    setApps(await req<GhApp[]>("/api/v1/forges/github-apps").catch(() => []));
+  }
+  useEffect(() => {
+    refresh();
+    const sp = new URLSearchParams(window.location.search);
+    if (sp.get("app") === "created") toast({ kind: "success", msg: `GitHub App "${sp.get("slug")}" registered — now install it on your repositories.` });
+    if (sp.get("setup") === "github-app") toast({ kind: "success", msg: "Installation received — repositories are syncing." });
+    if (sp.toString()) window.history.replaceState(null, "", window.location.pathname);
+  }, []);
+
+  async function registerApp() {
+    setAppBusy(true);
+    try {
+      const m = await req<{ post_url: string; manifest: Record<string, unknown> }>(`/api/v1/forges/github-app/manifest${appOrg ? `?org=${encodeURIComponent(appOrg)}` : ""}`);
+      // GitHub's manifest flow requires a real browser form POST
+      const form = document.createElement("form");
+      form.method = "POST"; form.action = m.post_url;
+      const input = document.createElement("input");
+      input.type = "hidden"; input.name = "manifest"; input.value = JSON.stringify(m.manifest);
+      form.appendChild(input); document.body.appendChild(form); form.submit();
+    } catch (e) { toast({ kind: "error", msg: String(e) }); setAppBusy(false); }
+  }
+
+  async function deleteApp(id: string) {
+    if (!confirm("Remove this GitHub App registration? Installations stop receiving reviews.")) return;
+    try { await req(`/api/v1/forges/github-apps/${id}`, { method: "DELETE" }); refresh(); }
+    catch (e) { toast({ kind: "error", msg: String(e) }); }
+  }
 
   async function handleAddForge(e: React.FormEvent) {
     e.preventDefault();
@@ -143,6 +178,43 @@ export default function ForgesPage() {
         }
       />
 
+      <Card className="mb-6 border border-purple-900/40 bg-purple-950/10">
+        <CardHeader title="GitHub App" subtitle="Recommended: install PRVet as an app — no personal tokens, org-wide, one webhook, merge gate as a check run."
+          action={
+            <div className="flex items-center gap-2">
+              <input value={appOrg} onChange={e => setAppOrg(e.target.value)} placeholder="org (blank = personal)"
+                className="w-44 px-2 py-1.5 text-xs bg-panel border border-border rounded font-mono focus:outline-none" />
+              <Button size="sm" onClick={registerApp} disabled={appBusy}>
+                {appBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <><GithubIcon className="h-4 w-4 mr-1.5" /> Register app on GitHub</>}
+              </Button>
+            </div>
+          } />
+        <CardBody>
+          {apps.length === 0 ? (
+            <p className="text-xs text-text-3">
+              Step 1 — <b>Register</b> creates the app in your GitHub account/org via the manifest flow (you approve on GitHub, then return here).
+              Step 2 — <b>Install</b> it on the repositories you want reviewed. Installations appear below as connections.
+              Requires <code className="font-mono">PUBLIC_URL</code> to be reachable by GitHub — in local dev run <code className="font-mono">ngrok http 8080</code>, put the https URL in <code className="font-mono">.env</code> as <code className="font-mono">PUBLIC_URL</code>, restart the API.
+            </p>
+          ) : (
+            <ul className="divide-y divide-border">
+              {apps.map(a => (
+                <li key={a.id} className="flex items-center gap-3 py-2 text-xs">
+                  <GithubIcon className="h-4 w-4 text-purple-400" />
+                  <div className="min-w-0 flex-1">
+                    <div className="font-medium text-text-1">{a.name} <span className="font-mono text-text-3">· {a.slug}</span></div>
+                    <div className="text-text-3">{a.installations} installation(s) · app id {a.app_id}</div>
+                  </div>
+                  {a.install_url && <a href={a.install_url} target="_blank" rel="noreferrer" className="rounded-md bg-emerald-600/20 px-3 py-1.5 font-medium text-emerald-300 hover:bg-emerald-600/30">Install on GitHub →</a>}
+                  {a.html_url && <a href={a.html_url} target="_blank" rel="noreferrer" className="text-text-3 hover:text-text-1">settings</a>}
+                  <Button variant="danger" size="sm" onClick={() => deleteApp(a.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardBody>
+      </Card>
+
       {forges.length === 0 ? (
         <EmptyState
           icon={Cable}
@@ -177,8 +249,12 @@ export default function ForgesPage() {
                     {f.forge_type.toUpperCase()}
                   </Chip>
                   <Chip>{f.status}</Chip>
+                  {f.installation_id && <Chip className="bg-emerald-950/40 text-emerald-400 border border-emerald-800">APP · {f.repo_count} repos</Chip>}
                 </div>
 
+                {f.installation_id ? (
+                  <p className="text-xs text-text-3">Events arrive on the app-level webhook; enabled repositories sync automatically from the installation.</p>
+                ) : (
                 <div>
                   <div className="mb-1 flex items-center justify-between text-xs text-text-3">
                     <span>Public webhook base URL</span>
@@ -207,6 +283,7 @@ export default function ForgesPage() {
                     </div>
                   )}
                 </div>
+                )}
               </CardBody>
             </Card>
           ))}

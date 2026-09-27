@@ -14,6 +14,7 @@ from sqlalchemy import text
 from crv_core.db import session_factory
 from crv_core.settings import get_settings
 from crv_api.routers.auth import get_current_user, verify_repo_access
+from crv_worker.forge_token import connection_auth
 
 router = APIRouter()
 
@@ -134,10 +135,7 @@ async def trigger_baseline(repo_id: str, force: bool = False) -> TriggerOut:
     local_path = cfg.get("local_path")
 
     if not local_path and row["forge_type"] == "github":
-        caps = row["capabilities"] or {}
-        token = caps.get("dev_token")
-        if not token:
-            raise HTTPException(400, "GitHub connection is missing a token — reconnect it")
+        token = await _repo_token(repo_id)
         try:
             local_path = _clone_or_pull(repo_id, row["full_name"], row["default_branch"], token)
         except subprocess.CalledProcessError as e:
@@ -225,6 +223,17 @@ async def list_findings(repo_id: str, limit: int = 100) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+async def _repo_token(repo_id: str) -> str:
+    async with session_factory()() as db:
+        cid = (await db.execute(text("SELECT connection_id::text FROM repositories WHERE id = :id"), {"id": repo_id})).scalar_one_or_none()
+    if cid is None:
+        raise HTTPException(404, "repo not found")
+    try:
+        return (await connection_auth(cid)).token
+    except LookupError as e:
+        raise HTTPException(400, f"forge connection unusable: {e}")
+
+
 def _clone_or_pull(repo_id: str, full_name: str, branch: str, token: str) -> str:
     root = Path(get_settings().storage_uri).expanduser().resolve() / "clones" / repo_id
     url = f"https://x-access-token:{token}@github.com/{full_name}.git"
@@ -288,9 +297,7 @@ async def get_repo_files(repo_id: str) -> list[str]:
         return sorted(file_paths)
         
     else:  # Assume github
-        token = (row["capabilities"] or {}).get("dev_token")
-        if not token:
-            raise HTTPException(400, "GitHub connection token not found")
+        token = await _repo_token(repo_id)
             
         import httpx
         repo_name = row["full_name"]
@@ -354,9 +361,7 @@ async def get_repo_file_content(repo_id: str, path: str) -> dict:
             raise HTTPException(500, f"Failed to read local file: {e}")
             
     else:  # Assume github
-        token = (row["capabilities"] or {}).get("dev_token")
-        if not token:
-            raise HTTPException(400, "GitHub connection token not found")
+        token = await _repo_token(repo_id)
             
         import httpx
         import base64

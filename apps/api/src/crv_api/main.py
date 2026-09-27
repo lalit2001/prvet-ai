@@ -13,7 +13,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
 from crv_api.middleware.request_id import RequestIdMiddleware
-from crv_api.routers import admin, config, findings, forges, health, providers, repos, reviews, webhooks, auth
+from crv_api.routers import admin, auth, config, findings, forges, github_app, graph, health, providers, repos, reviews, webhooks
 from crv_api.startup import clean_stale_runs, ensure_default_org, run_db_migrations
 from crv_core.settings import get_settings
 from crv_core.queue import pool as queue_pool
@@ -113,6 +113,8 @@ def create_app() -> FastAPI:
     app.include_router(forges.router, prefix="/api/v1")
     app.include_router(findings.router, prefix="/api/v1")
     app.include_router(auth.router, prefix="/api/v1")
+    app.include_router(graph.router, prefix="/api/v1")
+    app.include_router(github_app.router, prefix="/api/v1")
     return app
 
 

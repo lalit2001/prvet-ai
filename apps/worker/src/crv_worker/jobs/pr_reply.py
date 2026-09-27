@@ -5,30 +5,24 @@ import httpx
 from sqlalchemy import text
 
 from crv_core.db import session_factory
-from crv_adapters.llm import client_from_org
+from crv_worker.analysis.llm_review import _client
+from crv_worker.forge_token import connection_auth
 
 _GH = "https://api.github.com"
 
 
 async def run(ctx, connection_id: str, pr_number: int, repo_full_name: str, comment_id: str, body: str) -> dict:
     print(f"[pr_reply] Replying to comment {comment_id} on {repo_full_name} PR #{pr_number}")
-    async with session_factory()() as db:
-        conn = (await db.execute(text("""
-            SELECT capabilities, org_id FROM forge_connections WHERE id = :id
-        """), {"id": connection_id})).mappings().one_or_none()
-        if conn is None:
-            return {"status": "failed", "error": "connection not found"}
-            
-        token = (conn["capabilities"] or {}).get("dev_token")
-        org_id = conn["org_id"]
-        
-        if not token:
-            return {"status": "failed", "error": "no dev_token"}
+    try:
+        auth = await connection_auth(connection_id)
+    except LookupError as e:
+        return {"status": "failed", "error": str(e)}
+    token = auth.token
 
-    # Initialize LLM client
-    llm = await client_from_org(org_id)
-    if not llm:
-        return {"status": "failed", "error": "no llm client"}
+    try:
+        llm = await _client()
+    except Exception as e:  # noqa: BLE001
+        return {"status": "failed", "error": f"no llm client: {e}"}
 
     headers = {
         "Authorization": f"Bearer {token}",
